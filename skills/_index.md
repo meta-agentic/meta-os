@@ -39,6 +39,16 @@ whole library — never create a second real copy; discovery is via symlinks.
 Promote a library skill into the core table when it becomes part of the standing operating
 model; prune it when it proves dead weight.
 
+## Skill learnings — the improvement loop
+
+Skills self-improve structurally, not by memory: each skill in active use gets **one
+standing [[templates/skill-learnings|skill-learnings]] note** in the *instance*
+(`memory/wiki/skills/<skill>-learnings.md`). Per-run [[templates/skill-note|skill-notes]]
+feed it; when a learning generalizes beyond the instance, fold it into the skill's
+`SKILL.md` here via [[skills/skill-builder/SKILL|skill-builder]] and remove it from the
+note. Learnings never live in this folder — they are instance experience, and this repo
+stays public-safe.
+
 ## Adding a skill
 
 1. Build/scaffold it with [[skills/skill-builder/SKILL|skill-builder]].

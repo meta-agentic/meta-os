@@ -1,0 +1,119 @@
+# meta-os ontology — machine-readable contract for note types, tags, and relations.
+# Human rationale in systems/ontology.md. Instances extend via their own ontology.yaml
+# (additive merge: an instance may ADD types/fields/relations, never remove or redefine
+# framework ones).
+version: 1
+
+note_types:
+  index:
+    description: Table of contents for a folder; one per folder.
+    location: "**/_index.md"
+    required: [type, tags]
+  system:
+    description: How-the-OS-operates doc.
+    location: "systems/"
+    required: [type, tags]
+  project:
+    description: Registry node for a repo in the estate.
+    location: "projects/"
+    template: templates/project.md
+    required: [type, name, path, repo, stack, tags]
+  source:
+    description: Promoted research/paper note.
+    location: "memory/wiki/"
+    template: templates/source.md
+    required: [type, domain, url, date_added, tags]
+    optional: [author]
+  skill-note:
+    description: Decision/use log for a skill run.
+    location: "memory/wiki/"
+    template: templates/skill-note.md
+    required: [type, skill, date, tags]
+  skill-learnings:
+    description: >
+      Standing learnings note for one skill — ONE per skill, continuously updated.
+      Per-run skill-notes feed it; learnings that generalize fold back into the skill's
+      SKILL.md (public-safe) via skill-builder. Lives in the instance because learnings
+      are instance experience — never inside the framework's skills/ folder.
+    location: "memory/wiki/skills/"
+    template: templates/skill-learnings.md
+    required: [type, skill, tags]
+  heartbeat:
+    description: Scheduled OS self-check capture — anomalies observed, filed to raw.
+    location: "memory/raw/"
+    template: templates/heartbeat.md
+    required: [type, date, tags]
+  daily:
+    description: Daily standup / capture note.
+    location: "memory/raw/"
+    template: templates/daily.md
+    required: [type, date, tags]
+
+tags:
+  rule: "lowercase, namespaced as type/subtype"
+  namespaces:
+    project: "one per registry node, e.g. project/<name>"
+    source: "research provenance, e.g. source/research"
+    os: "framework internals, e.g. os/memory"
+    skill: "notes about a skill's use"
+    daily: "capture cadence, e.g. daily, standup"
+
+# Typed links used in note BODIES (canonized from templates/source.md "Graph relations").
+# Plain [[wikilinks]] stay untyped — typing is optional signal, not a gate.
+link_relations:
+  INFORMS: "source/insight that shaped a system, skill, or decision"
+  APPLIES_TO: "knowledge scoped to a project or domain"
+  RELATED: "untyped-but-deliberate association"
+
+# Flow vocabulary — lanes, queues, and the metrics derived from them. Flow entities are
+# NOT notes: their authority is the process feed (tracker / backlog mirror, swarm batch
+# state, vault git history). The ontology defines the vocabulary; layer 3 derives the
+# entities and computes the metrics. See systems/swarm-harness.md and systems/memory-layer.md.
+flow:
+  pipelines:
+    swarm-lane:
+      description: One lead agent in one worktree working one vertical slice.
+      stages: [queued, branch, implement, clean-verify, review, pr, merged]
+      item: story
+      source: "tracker / backlog mirror + swarm batch state"
+    memory-promotion:
+      description: The raw -> wiki -> output knowledge discipline.
+      stages: [raw, wiki, output]
+      item: note
+      source: "vault git history (file moves carry the transition timestamps)"
+  item_states: [todo, in-progress, blocked, done]
+  metrics:
+    instant:
+      wip: "items in flight per lane/stage"
+      queue_depth: "items waiting at each stage"
+      blocked: "count + age of blocked items"
+      item_age: "time since an item entered its current stage (staleness signal)"
+      flow_efficiency: "active time / total elapsed time per item"
+    forecast:
+      throughput: "items completed per period, trailing window"
+      cycle_time: "distribution of stage-entry to done, not just the average"
+      eta: "Little's Law — queue_depth / throughput per lane"
+      stale_raw_growth: "memory-promotion capture rate vs. promotion rate"
+  requires: "stage-transition timestamps — tracker changelog, PR events, vault git log"
+
+# Automations contract — the instance's automations/_index.md table plus its run log.
+# Cadence is cron or a cron nickname (@daily) for scheduled rows, "—" for event-driven.
+# Executions append to automations/runs.jsonl (one JSON object per line); layer 3 derives
+# last-run per automation from it and reports "never" when the log is absent — no faking.
+automations:
+  table_columns: [automation, trigger, cadence, runs, status]
+  statuses: [candidate, shipped, retired]
+  run_log:
+    path: automations/runs.jsonl
+    entry: { automation: "name matching the table row", ts: "ISO-8601", outcome: "ok | fail", note: "optional" }
+
+# Graph-layer vocabulary (graphify). Kept here so vault and graph share one contract.
+graph:
+  node_types: [code, document, paper, image, rationale, concept]
+  edge_relations:
+    [calls, implements, references, cites, conceptually_related_to,
+     shares_data_with, semantically_similar_to, rationale_for]
+  confidence:
+    EXTRACTED: "explicit in source (1.0)"
+    INFERRED: "derived, decreasing score (0.95–0.55)"
+    AMBIGUOUS: "uncertain; flagged for human review"

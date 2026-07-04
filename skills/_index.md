@@ -24,7 +24,7 @@ whole library — never create a second real copy; discovery is via symlinks.
 | [[skills/pair-programming/SKILL\|pair-programming]] | Dev | Driver/navigator pairing with live verification |
 | [[skills/verification-quality/SKILL\|verification-quality]] | Quality | Truth scoring, quality gates, automatic rollback |
 | [[skills/reasoningbank-intelligence/SKILL\|reasoningbank-intelligence]] | Learning | Trajectory tracking, pattern distillation, adaptive learning |
-| [[skills/dual-mode/SKILL\|dual-mode]] | Meta | Dual-mode operation |
+| [[skills/dual-mode/README\|dual-mode]] | Meta | Claude Code + headless Codex hybrid orchestration — ⚠️ unverified provenance, see [PROVENANCE](../PROVENANCE.md) |
 
 ## Library — full catalog
 

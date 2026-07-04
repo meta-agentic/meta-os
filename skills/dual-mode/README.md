@@ -1,5 +1,9 @@
 # Dual-Mode Skills (Claude Code + Codex)
 
+> ⚠️ **Unverified provenance.** This skill arrived with the claude-flow skill batch but no
+> public upstream has been identified (presumed MIT). Verify or rewrite before
+> redistributing or relying on it in critical workflows. See [PROVENANCE.md](../../PROVENANCE.md).
+
 Optional skills for orchestrating Claude Code and headless Codex workers together.
 
 ## Available Skills

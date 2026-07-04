@@ -28,24 +28,46 @@ vault you actually open.
 Plus [`systems/`](systems/) (how the OS operates), [`agents/`](agents/) (roster +
 coordination patterns), [`templates/`](templates/).
 
-## Setting up an instance
+## Prerequisites
 
-Fastest path: use
-**[meta-os-instance-template](https://github.com/mova77/meta-os-instance-template)** —
-click "Use this template" to get a private instance repo with the folder skeleton,
-`_index.md` tables of contents, and framework symlinks already wired. Its README covers
-cloning it as a sibling of `meta-os` and the remaining setup steps.
+- **[Claude Code](https://claude.com/claude-code)** — required; runs the skills and reads `CLAUDE.md`.
+- **[Obsidian](https://obsidian.md)** — optional; lets you browse the vault as a graph.
+  Everything works from Claude Code alone without it.
+- **Python 3** — optional; only used by the [`graphify`](skills/graphify/) skill, which
+  self-installs its one dependency (`pip install graphifyy`) the first time it runs.
+  Nothing to install up front.
+- **git** (+ [`gh`](https://cli.github.com/), optional) — to clone the two repos below.
 
-To build one by hand instead:
+## Setting up the two repos
 
-1. Create a private repo with `CLAUDE.md`, `_index.md`, `projects/`, `memory/`,
-   `automations/`, `vaults/`.
-2. Mount the framework as sibling symlinks: `skills/ → ../meta-os/skills`, likewise
-   `systems/`, `templates/`, `agents/`. Vault-root-relative wikilinks then resolve
-   identically in both repos.
-3. Open the instance as your Obsidian vault.
-4. For machine-global skill discovery in Claude Code:
-   `ln -s $(pwd)/meta-os/skills/<name> ~/.claude/skills/<name>` per skill.
+`meta-os` (this repo) and your private instance must sit **as siblings** in the same
+parent folder — the instance's `skills/`, `systems/`, `templates/`, `agents/` are
+relative symlinks (`../meta-os/...`).
+
+```bash
+mkdir agentic-os && cd agentic-os
+
+# 1. the public framework
+git clone git@github.com:mova77/meta-os.git
+
+# 2. your private instance — from the template (fastest)
+gh repo create <you>/<instance>-os --template mova77/meta-os-instance-template --private --clone
+cd <instance>-os
+```
+
+No `gh` / prefer to build it by hand? Create a private repo with `CLAUDE.md`,
+`_index.md`, `projects/`, `memory/{raw,wiki,output}/`, `automations/`, `vaults/`, then
+symlink `skills/ systems/ templates/ agents/` to `../meta-os/<same name>`.
+
+Then:
+
+1. Open `<instance>-os/` (**not** `meta-os/`) as your Obsidian vault — wikilinks resolve
+   across both repos since they're vault-root-relative.
+2. Fill in the new repo's `CLAUDE.md` / `_index.md` with your instance facts.
+3. *(optional)* machine-global skill discovery in Claude Code:
+   ```bash
+   for s in ../meta-os/skills/*/; do ln -s "$(pwd)/$s" ~/.claude/skills/"$(basename "$s")"; done
+   ```
 
 ## Conventions
 

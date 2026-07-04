@@ -68,6 +68,10 @@ Then:
    ```bash
    for s in ../meta-os/skills/*/; do ln -s "$(pwd)/$s" ~/.claude/skills/"$(basename "$s")"; done
    ```
+4. In Claude Code, run the [`bootstrap-instance`](skills/bootstrap-instance/SKILL.md)
+   skill — a one-time onboarding conversation that decides your backlog/tracking model
+   (none / local JSON / Jira-integrated), registers your first project, and optionally
+   wires up its GitHub repo.
 
 ## Conventions
 

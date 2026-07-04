@@ -22,3 +22,6 @@
 .claude-flow/
 .swarm/
 agentdb.rvf*
+
+# Machine-local Claude Code config (dev-server launch configs carry absolute paths)
+.claude/

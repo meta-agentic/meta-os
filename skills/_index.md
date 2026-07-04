@@ -18,6 +18,7 @@ whole library — never create a second real copy; discovery is via symlinks.
 | [[skills/agile-swarm/SKILL\|agile-swarm]] | Process | Running a sprint as parallel multi-lane worktree-isolated agent swarms |
 | [[skills/graphify/SKILL\|graphify]] | Memory | Turn any folder (code/docs/papers/media) into a navigable knowledge graph |
 | [[skills/skill-builder/SKILL\|skill-builder]] | Meta | Author new skills with correct frontmatter + progressive disclosure |
+| [[skills/bootstrap-instance/SKILL\|bootstrap-instance]] | Meta | One-time onboarding for a fresh instance repo: backlog/tracking model, first project, GitHub integration |
 | [[skills/hooks-automation/SKILL\|hooks-automation]] | Automation | Pre/post-task hooks, session mgmt, git + memory coordination |
 | [[skills/swarm-orchestration/SKILL\|swarm-orchestration]] | Orchestration | Multi-agent parallel execution, dynamic topology |
 | [[skills/stream-chain/SKILL\|stream-chain]] | Orchestration | Stream-JSON multi-agent pipelines & sequential workflows |

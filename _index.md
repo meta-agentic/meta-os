@@ -2,7 +2,7 @@
 type: index
 tags: [os, home, moc]
 ---
-# 🧠 isohub-metaos — Agentic OS Home
+# 🧠 meta-os — Agentic OS Home
 
 The map of content for the OS. This vault is the meta-layer above every project — see
 [[CLAUDE|CLAUDE.md]] for the contract.

@@ -1,4 +1,4 @@
-# isohub-metaos — our Agentic OS
+# meta-os — our Agentic OS
 
 An **Agentic OS**: the meta-layer that sits above all our repos and holds what outlives
 any single one — a **skill backbone**, a **memory** (Obsidian knowledge base), an **agent

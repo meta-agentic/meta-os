@@ -1,4 +1,4 @@
-# isohub-metaos — the Agentic OS
+# meta-os — the Agentic OS
 
 This vault **is** the operating system. It is the meta-layer that sits above every
 project ([[isohub]], [[vectis]], [[tessera]], [[io.space.infra]], [[isohub-assets]],
@@ -26,7 +26,7 @@ Supporting registries: [[projects/_index|projects/]] (one node per repo) ·
 ## Folder conventions
 
 ```
-isohub-metaos/
+meta-os/
 ├── CLAUDE.md            ← this contract (appended to every prompt here)
 ├── _index.md            ← OS home / map of content — start here
 ├── skills/              ← Layer 1: canonical skill backbone (authoritative copies)
@@ -49,7 +49,7 @@ this keeps navigation token-efficient as the vault grows past 100+ files.
 ## Rules of the OS
 
 - **Skills live here and only here.** `skills/` is the single copy. Discovery everywhere
-  is via symlinks: `~/.claude/skills/<name> → isohub-metaos/skills/<name>` (machine-global,
+  is via symlinks: `~/.claude/skills/<name> → meta-os/skills/<name>` (machine-global,
   every repo sees them). `scrum/.claude/skills` is retired. Never create a second real copy.
 - **Project vaults are symlinked, not absorbed.** `vaults/isohub → isohub/isohub` and
   `vaults/herakles → Herakles/herakles-vault` join the Obsidian graph while their files stay

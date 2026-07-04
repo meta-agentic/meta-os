@@ -18,12 +18,25 @@ vault you actually open.
 2. **Memory** — `raw/` (captures) → `wiki/` (refined reference) → `output/`
    (deliverables). The skeleton + promotion discipline live here; the content lives in
    your instance.
-3. **Interface** — the Obsidian graph; a dashboard is future work, built last.
+3. **Interface** — the Obsidian graph, plus an optional dashboard: see
+   [`systems/interface-layer.md`](systems/interface-layer.md) for the contract and
+   [meta-os-dashboard](https://github.com/mova77/meta-os-dashboard) for a reference
+   implementation (sprint lanes, a live knowledge graph, memory pipeline, ontology
+   linting). [`systems/ontology.md`](systems/ontology.md) defines the shared vocabulary
+   layers 2 and 3 read from.
 
 Plus [`systems/`](systems/) (how the OS operates), [`agents/`](agents/) (roster +
 coordination patterns), [`templates/`](templates/).
 
 ## Setting up an instance
+
+Fastest path: use
+**[meta-os-instance-template](https://github.com/mova77/meta-os-instance-template)** —
+click "Use this template" to get a private instance repo with the folder skeleton,
+`_index.md` tables of contents, and framework symlinks already wired. Its README covers
+cloning it as a sibling of `meta-os` and the remaining setup steps.
+
+To build one by hand instead:
 
 1. Create a private repo with `CLAUDE.md`, `_index.md`, `projects/`, `memory/`,
    `automations/`, `vaults/`.

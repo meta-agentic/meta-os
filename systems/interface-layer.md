@@ -39,6 +39,8 @@ interface reads, how it triggers work, and the principles it renders by.
 | Process state | tracker / backlog mirror | Sprint board, lane status |
 | Flow state | tracker changelog + swarm batch state + vault git log | Lane queues + flow metrics (below) |
 | Vault activity | instance git log | Recent-changes widget |
+| Outputs | `memory/output/` + recent `memory/wiki/` promotions (front-matter + git history) | Output inbox — deliverables, faceted by type/project |
+| Engine usage | engine session logs (local JSONL; path in dashboard config) | Tokens × model × project × day. Local-only — session logs are instance content and never enter a repo |
 
 Graph queries can go through graphify's MCP server (`query_graph`, `god_nodes`,
 `shortest_path`, …) instead of re-implementing traversal.

@@ -12,6 +12,9 @@ the *rules*.
 - **raw/** — capture everything, structure nothing. Disposable. Never authoritative.
 - **wiki/** — the durable, linked, indexed reference. Only **promoted** notes live here.
 - **output/** — finished deliverables, each linking back to the wiki notes it drew from.
+  Namespace by project when volume warrants (`output/<project>/`). A project that
+  delivers somewhere *else* declares it in its registry node's `output:` field — see
+  [[systems/distribution]], "Where deliverables land".
 
 ## Promotion is the whole game
 

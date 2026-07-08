@@ -18,6 +18,10 @@ note_types:
     location: "projects/"
     template: templates/project.md
     required: [type, name, path, repo, stack, tags]
+    # output: where this project's finished deliverables land — a repo (org/repo or
+    # URL, existing or still empty) or a path. Absent → the default: the instance's
+    # memory/output/ (see systems/distribution.md, "Where deliverables land").
+    optional: [output]
   source:
     description: Promoted research/paper note.
     location: "memory/wiki/"

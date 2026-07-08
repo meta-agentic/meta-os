@@ -16,6 +16,22 @@ Run this **once per new instance**, right after the repo is cloned and opened. I
 not a standing operating skill — [[skills/agile-process/SKILL|agile-process]],
 [[skills/graphify/SKILL|graphify]], etc. take over from here.
 
+## Step 0 — Framework mounts sanity
+
+Before any decision, verify the framework is actually mounted (both consumption modes
+are described in [[systems/distribution]]):
+
+- `skills/` etc. point at `.meta-os/*` (**submodule mode**, the template default): if
+  `.meta-os/` is empty the user cloned without `--recursive` — run
+  `git submodule update --init .meta-os` and re-check.
+- Mounts point at `../meta-os/*` (**sibling mode**): confirm the sibling checkout
+  exists; if not, offer `scripts/framework-mode.sh submodule` to switch to the
+  self-contained mode instead.
+- Broken or missing symlinks either way → `scripts/framework-mode.sh <mode>` repairs
+  them.
+
+Don't proceed while a mount dangles — every later step reads through them.
+
 ## Step 1 — Backlog & tracking model
 
 Ask the user (present as distinct options, not a leading question):

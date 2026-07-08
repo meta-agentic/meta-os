@@ -30,11 +30,13 @@ meta-os/  (this repo — PUBLIC-SAFE)      <instance>/  (private — the vault y
 ├── agents/      ← roster + patterns     ├── memory/     ← the live knowledge
 ├── templates/   ← note templates        ├── automations/← live routine rows
 ├── memory/      ← empty skeleton        ├── vaults/     ← federated project vaults
-└── CLAUDE.md    ← this contract         └── skills,systems,templates,agents → ../meta-os/*
+└── CLAUDE.md    ← this contract         └── skills,systems,templates,agents → (.)meta-os/*
 ```
 
-Mounts are **sibling symlinks per folder**, so vault-root-relative wikilinks
-(`[[skills/…]]`, `[[systems/…]]`) resolve identically in both repos.
+Mounts are **symlinks per folder** — to the instance's `.meta-os/` submodule (default)
+or a sibling checkout (developer mode; see [[systems/distribution]]) — so
+vault-root-relative wikilinks (`[[skills/…]]`, `[[systems/…]]`) resolve identically in
+both repos.
 
 ## Conventions (apply in framework and instance alike)
 

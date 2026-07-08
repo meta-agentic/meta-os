@@ -20,13 +20,19 @@ only *how the framework arrives on disk*.
 
 | Mode | Get it | Update it | For |
 |------|--------|-----------|-----|
-| **1 · Single clone (submodule)** — default for adopters | `git clone --recursive <your-instance>` (created from the instance template; `meta-os` is a git submodule inside it) | `git submodule update --remote meta-os`, commit the pin — a deliberate, reviewable version bump | Users who want one repo that just works |
+| **1 · Single clone (submodule)** — default for adopters | `git clone --recursive <your-instance>` (created from the instance template; the framework is the `.meta-os` submodule inside it) | `git submodule update --remote .meta-os`, commit the pin — a deliberate, reviewable version bump | Users who want one repo that just works |
 | **2 · Sibling checkouts** — developer mode | clone framework and instance side by side; per-folder symlinks (`skills → ../meta-os/skills`) | `git pull` in `meta-os/` | Anyone hacking the framework itself while running an instance |
 | **3 · Container** | `docker compose up` — image ships framework + engine + dashboard at a pinned tag | pull a newer image tag; volumes untouched | Zero-setup / server installs (layout below) |
 
 In modes 1 and 2 the instance's mount folders are the same four symlinks; only the
-target differs (`meta-os/skills` vs `../meta-os/skills`). Vault-root-relative wikilinks
-resolve identically, so notes never know which mode they're in.
+target differs (`.meta-os/skills` vs `../meta-os/skills`), and the template's
+`scripts/framework-mode.sh` flips between them. Vault-root-relative wikilinks resolve
+identically, so notes never know which mode they're in. The submodule deliberately
+lives at a **dot-path** (`.meta-os`): Obsidian ignores dot-folders, so framework notes
+enter the vault graph once — through the mounts — instead of twice.
+
+Mode 1 is implemented in the instance template (submodule + mounts + mode script);
+mode 3 is designed below, not yet built.
 
 ## Why not one merged repo
 

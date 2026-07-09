@@ -29,6 +29,14 @@ packs:
     license: verify-at-add
     status: available
 
+  mattpocock:
+    repo: https://github.com/mattpocock/skills
+    ref: main
+    description: "Matt Pocock's engineering & productivity skills (tdd, code-review, codebase-design, domain-modeling, diagnosing-bugs, research, …). Category-nested; ships .claude-plugin/plugin.json — 21 skills, deprecated/personal excluded by the author."
+    provenance: third-party
+    license: MIT   # verified: LICENSE — MIT, Matt Pocock
+    status: available
+
   claude-flow:
     repo: https://github.com/ruvnet/claude-flow
     ref: main
@@ -53,7 +61,13 @@ packs:
 # confirmed first — the curation bar in systems/packs.md applies):
 #   everything-claude-code (agent harness), gstack (role-based orchestration),
 #   open-design (UI prototyping toolkit), claude-mem (persistent memory),
-#   andrej-karpathy-skills (behavioral guidelines).
+#   andrej-karpathy-skills (behavioral guidelines),
+#   jeffallan/claude-skills, alirezarezvani/claude-skills (community skill hubs,
+#     surfaced via the Snyk "top Claude skills" roundup — verify license/layout).
+# Capability themes from that roundup (TDD, systematic debugging, frontend design
+# control, context management, dependency management) are skill *concepts*, not repos:
+# tdd + diagnosing-bugs come from the mattpocock pack, others inform MOS-21's SWE pack
+# scope rather than being registry entries.
 # Directories/utilities that are NOT packs (see "Not packs" in systems/packs.md):
 #   awesome-claude-skills, awesome-agent-skills, anthropics/claude-cookbooks,
 #   modelcontextprotocol/servers, ccusage.

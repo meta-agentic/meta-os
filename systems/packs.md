@@ -8,7 +8,12 @@ The framework core stays **generic by construction**: it ships only the skills t
 part of the OS itself (bootstrapping, skill authoring, graph, hooks, verification).
 Everything that encodes *a* process rather than *the* OS — an agile method, a swarm
 lab, a third-party skill collection — is a **pack**: a separate repo, mounted into an
-instance on demand, individually pinned and updatable. Same philosophy as the
+instance on demand, individually pinned and updatable.
+
+Packs are also how the OS stays **domain-agnostic**: a software-delivery estate mounts
+the agile pack, a research instance might mount a literature-review pack, a
+systems-engineering instance a requirements/trade-study pack — same core, different
+opinions. Zero packs is a fully supported install. Same philosophy as the
 [[systems/distribution|framework mount]] itself; packs just apply it per-domain.
 
 ## What a pack is

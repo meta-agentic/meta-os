@@ -59,10 +59,18 @@ but reported as unregistered/unverified when added.
 | Unmount | `scripts/packs.sh remove <name>` | submodule removed + union re-sync |
 | Upgrade | `scripts/packs.sh update [name]` | pin bump (reviewable commit) + re-sync |
 | Inspect | `scripts/packs.sh list` | mounted packs, pins, skill counts |
-| Rebuild | `scripts/packs.sh sync` | regenerate the union `skills/` |
+| Rebuild | `scripts/packs.sh sync` | regenerate the union `skills/` + `.claude/` |
+| Reconcile | `scripts/packs.sh apply` | make mounts match the instance's `.packs.yaml` manifest |
 
 Pins are commits: upgrading a pack is a deliberate, diffable change in the instance's
 history — never an ambient drift.
+
+**Declarative selection / headless installs.** The instance's `.packs.yaml` is the
+desired-state list; `add`/`remove` maintain it, `apply` reconciles to it
+(idempotent). A container entrypoint or CI can therefore install packs with no
+conversation at all: write the manifest (e.g. from a feature flag like
+`METAOS_PACKS=agile,superpowers` on first run) and run `apply`. The selection lives in
+the vault, so it survives image upgrades and re-applies on every boot.
 
 ## Not packs, still worth knowing
 

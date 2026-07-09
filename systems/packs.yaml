@@ -29,12 +29,23 @@ packs:
     license: verify-at-add
     status: available
 
+  claude-flow:
+    repo: https://github.com/ruvnet/claude-flow
+    ref: main
+    description: "Ruflo / claude-flow — the swarm-orchestration ecosystem most of this framework's original skill library came from (see PROVENANCE.md: agentdb-*, v3-*, flow-nexus-*, github-*, sparc/swarm/reasoningbank sets)."
+    provenance: third-party
+    license: MIT
+    status: planned   # becomes the mount that REPLACES the vendored copies once the
+                      # de-vendor story lands; upstream skill layout to verify (the
+                      # copies were installed via the claude-flow ecosystem, so the
+                      # pack may end up an attributed mirror pinned at upstream)
+
 # Candidates awaiting verification before entering the curated list (community
 # suggestions; upstream owner/repo, license, and mountable-skill layout must be
 # confirmed first — the curation bar in systems/packs.md applies):
-#   everything-claude-code (agent harness), ruflo (swarm meta-harness),
-#   gstack (role-based orchestration), open-design (UI prototyping toolkit),
-#   claude-mem (persistent memory), andrej-karpathy-skills (behavioral guidelines).
+#   everything-claude-code (agent harness), gstack (role-based orchestration),
+#   open-design (UI prototyping toolkit), claude-mem (persistent memory),
+#   andrej-karpathy-skills (behavioral guidelines).
 # Directories/utilities that are NOT packs (see "Not packs" in systems/packs.md):
 #   awesome-claude-skills, awesome-agent-skills, anthropics/claude-cookbooks,
 #   modelcontextprotocol/servers, ccusage.

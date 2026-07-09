@@ -59,6 +59,16 @@ but reported as unregistered/unverified when added.
 Pins are commits: upgrading a pack is a deliberate, diffable change in the instance's
 history — never an ambient drift.
 
+## Not packs, still worth knowing
+
+Some widely-used resources don't mount as packs and shouldn't be forced into the
+model: **awesome-lists** (skill *directories* — browse them to find pack candidates),
+**anthropics/claude-cookbooks** (notebooks/patterns, not SKILL.md folders),
+**modelcontextprotocol/servers** (MCP servers — connect them via engine config, not
+mounts), **ccusage** (a CLI utility; the dashboard's usage widget covers the same logs
+natively). The registry keeps a comment block of such non-pack resources and of
+candidates awaiting provenance verification.
+
 ## Migration
 
 Skills extracted from the framework core reappear as packs (first: the agile set; then

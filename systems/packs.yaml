@@ -1,0 +1,22 @@
+# Curated skill-pack registry — consumed by the instance template's scripts/packs.sh
+# and by bootstrap-instance's pack-selection step. Contract + curation bar in
+# systems/packs.md. Keep entries flat and grep-parsable (name → fields, two-space
+# indents): the mount script reads this without a YAML library.
+version: 1
+
+packs:
+  agile:
+    repo: https://github.com/mova77/meta-os-agile-pack
+    ref: main
+    description: "Scrum harness for an agentic estate: agile-process (backlog/Jira mirror, ceremonies), agile-swarm (multi-lane sprint execution), github-project-management. Extracted from the framework core."
+    provenance: first-party
+    license: MIT
+    status: planned   # flips to available when the extraction lands
+
+  superpowers:
+    repo: https://github.com/obra/superpowers
+    ref: main
+    description: "Well-known third-party Claude Code skill collection (TDD, debugging, planning discipline, and more)."
+    provenance: third-party
+    license: verify-at-add   # check upstream LICENSE when mounting
+    status: available

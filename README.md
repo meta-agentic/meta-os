@@ -11,6 +11,25 @@ vault you actually open.
 > (After [chaseAI's Agentic OS](https://www.chaseai.io/blog/agentic-os-skill-backbone-not-dashboard)
 > and Karpathy's `raw → wiki → output` LLM-wiki pattern.)
 
+## Not just for software
+
+The OS is **domain-agnostic**: the three layers — codified skills, `raw → wiki →
+output` memory, a graph/dashboard over both — fit any sustained knowledge work. A
+software estate is just the best-documented instance so far. Equally natural instances:
+
+- **Deep scientific research** — papers captured to `raw/`, promoted to a linked
+  `wiki/`, syntheses and reports delivered to `output/`; graphify over the literature.
+- **Systems design & engineering** — requirements, trade studies, and design decisions
+  as the pipeline; the registry tracks subsystems instead of repos.
+- **Working an existing Obsidian vault** — mount the OS around what you already have
+  (vault federation) and get promotion discipline, automations, and observability over it.
+- Content production, legal casework, ops runbooks — anywhere "capture → refine →
+  deliver" repeats.
+
+Domain-specific *process* lives in mountable [packs](systems/packs.md), not in the
+core — the agile/Scrum set is simply the first such opinion, and choosing zero packs is
+a fully supported install.
+
 ## Layers
 
 1. **Skills & automation** — [`skills/`](skills/): the executable workflow library.

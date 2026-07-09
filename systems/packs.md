@@ -74,6 +74,7 @@ but reported as unregistered/unverified when added.
 | Inspect | `scripts/packs.sh list` | mounted packs, pins, skill counts |
 | Rebuild | `scripts/packs.sh sync` | regenerate the union `skills/` + `.claude/` |
 | Reconcile | `scripts/packs.sh apply` | make mounts match the instance's `.packs.yaml` manifest |
+| Configure | `scripts/packs.sh config <pack> [key]` | resolve a pack's parameters (instance `config:` over `pack.yaml` defaults), validate enums |
 
 Pins are commits: upgrading a pack is a deliberate, diffable change in the instance's
 history — never an ambient drift.

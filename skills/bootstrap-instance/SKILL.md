@@ -62,10 +62,17 @@ offer the `available` entries by name + description — plus "none, add later". 
 chosen pack run `scripts/packs.sh add <name>`; report the provenance/license line as
 you do. Mounting auto-enriches the project-local `.claude/` (skills + agents); if a
 pack stages hooks, list them and ask per-hook before wiring any into
-`.claude/settings.json` — never enable executable hooks silently. If the user picked the Jira-integrated backlog model in Step 1, suggest the
-agile pack when it's available. Custom repos are allowed
-(`scripts/packs.sh add <name> <url>`) but tell the user they're outside the curated
-registry.
+`.claude/settings.json` — never enable executable hooks silently. Custom repos are
+allowed (`scripts/packs.sh add <name> <url>`) but tell the user they're outside the
+curated registry.
+
+**Configure a mounted pack.** A pack that ships a `pack.yaml` is parameterised — write
+its `config:` block under `packs.<name>` in `.packs.yaml` from the choices already made,
+then confirm with `scripts/packs.sh config <name>`. For the **agile** pack, map the
+Step 1 backlog model straight to its config: Jira-integrated → `profile: scrum, tracker:
+jira` (+ `space`, `mirror-repo`); local JSON → `profile: scrum, tracker: local`; no
+tracker → `profile: kanban, tracker: none`. Suggest the agile pack whenever the user
+chose any tracked model in Step 1.
 
 ## Step 2 — First project
 

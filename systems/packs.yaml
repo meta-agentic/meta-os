@@ -40,6 +40,14 @@ packs:
                       # copies were installed via the claude-flow ecosystem, so the
                       # pack may end up an attributed mirror pinned at upstream)
 
+  software-engineering:
+    repo: https://github.com/mova77/meta-os-swe-pack
+    ref: main
+    description: "Software-engineering & OOD discipline: design principles applied in review context (SOLID/GRASP, composition), ADR discipline, design reviews. First-party."
+    provenance: first-party
+    license: MIT
+    status: planned   # lands with its authoring story
+
 # Candidates awaiting verification before entering the curated list (community
 # suggestions; upstream owner/repo, license, and mountable-skill layout must be
 # confirmed first — the curation bar in systems/packs.md applies):

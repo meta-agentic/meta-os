@@ -77,6 +77,38 @@ conversation at all: write the manifest (e.g. from a feature flag like
 `METAOS_PACKS=agile,superpowers` on first run) and run `apply`. The selection lives in
 the vault, so it survives image upgrades and re-applies on every boot.
 
+## Parameterisation — method vs. opinion
+
+A pack that hardcodes its author's conventions just relocates opinion; the contract is
+that packs separate three things:
+
+1. **Method (invariant)** — what the pack *is*: the ceremony structure, the lane model,
+   the review discipline. Lives in the pack's skills, versioned with the pack.
+2. **Parameters (chosen per instance)** — names, trackers, cadences, repos. A pack
+   documents its knobs in its README; the instance sets them in `.packs.yaml` under the
+   pack's `config:` block (it's the one desired-state file packs already own):
+
+   ```yaml
+   packs:
+     agile:
+       config:
+         space: acme
+         tracker: jira          # jira | local | none
+         mirror-repo: you/scrum-mirror
+   ```
+
+   Skills read config-first and fall back to their documented defaults; placeholders in
+   a pack's docs (`<SPACE>`-style) name the keys that resolve from this block.
+3. **Conventions (overridable)** — branch rules, DoR lists, commit formats. Packs ship
+   them as *data* (files the skills read) with instance-side overrides winning, additive
+   merge — the same template-chain semantics the OS uses elsewhere. Hooks remain opt-in
+   per hook, always, regardless of configuration.
+
+Packs MAY ship **profiles** — named convention bundles (e.g. a Scrum-with-tracker
+profile vs. a lightweight Kanban profile) selected via `config: profile: <name>` — so
+"choose a methodology" is a one-line decision, and "change it" is an edit to instance
+data, never a fork of the pack.
+
 ## Not packs, still worth knowing
 
 Some widely-used resources don't mount as packs and shouldn't be forced into the

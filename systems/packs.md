@@ -18,10 +18,18 @@ opinions. Zero packs is a fully supported install. Same philosophy as the
 
 ## What a pack is
 
-A git repo carrying `skills/<name>/SKILL.md` folders (a `skills/` dir at the repo root,
-or skill folders at the root itself — the mount script auto-detects). It MAY also carry
-`agents/` (engine agent definitions, `*.md`) and `hooks/` (hook scripts). A pack needs
-no special manifest — existing third-party skill collections qualify as-is.
+A git repo carrying `SKILL.md` folders. The mount resolves a pack's skills two ways:
+
+- **`.claude-plugin/plugin.json` present** → its `skills[]` list is **authoritative**
+  (honours the author's own inclusions/exclusions — e.g. a `deprecated/` or `personal/`
+  category the manifest omits stays unmounted).
+- **otherwise** → `SKILL.md` is discovered **recursively at any depth**, so both flat
+  (`skills/<name>/`) and category-nested (`skills/<category>/<name>/`) collections work.
+
+The skill's mounted name is its folder basename. A pack MAY also carry `agents/`
+(engine agent definitions, `*.md`) and `hooks/` (hook scripts). No special manifest is
+required — existing third-party skill collections, and Claude Code plugins, qualify
+as-is.
 
 ## Mount model (in the instance)
 

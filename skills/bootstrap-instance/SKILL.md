@@ -21,9 +21,11 @@ not a standing operating skill — [[skills/agile-process/SKILL|agile-process]],
 Before any decision, verify the framework is actually mounted (both consumption modes
 are described in [[systems/distribution]]):
 
-- `skills/` etc. point at `.meta-os/*` (**submodule mode**, the template default): if
-  `.meta-os/` is empty the user cloned without `--recursive` — run
-  `git submodule update --init .meta-os` and re-check.
+- `agents/`, `systems/`, `templates/` point at `.meta-os/*` (**submodule mode**, the
+  template default): if `.meta-os/` is empty the user cloned without `--recursive` —
+  run `git submodule update --init .meta-os` and re-check. (`skills/` is a real
+  directory — the union mount over framework + packs; `scripts/packs.sh sync` rebuilds
+  it if links dangle.)
 - Mounts point at `../meta-os/*` (**sibling mode**): confirm the sibling checkout
   exists; if not, offer `scripts/framework-mode.sh submodule` to switch to the
   self-contained mode instead.
@@ -51,6 +53,17 @@ Record the choice in the instance's `CLAUDE.md`, "Instance facts" section:
 - **(1)** — leave the authority-order line out entirely.
 - **(2)** — `**Backlog:** local JSON — see \`<path-to-backlog.json>\`. No external tracker.`
 - **(3)** — `**Authority order (process/backlog):** Jira (project <KEY>) → \`<mirror-repo>/backlog.json\` → agile-process → framework invariants.` and confirm a mirror repo exists (offer to `gh repo create <owner>/<mirror-repo> --private` if not — **ask before creating**).
+
+## Step 1b — Skill packs
+
+The core ships only generic OS skills; domain skill sets are **packs**
+([[systems/packs]]). Read the registry through the mount (`systems/packs.yaml`) and
+offer the `available` entries by name + description — plus "none, add later". For each
+chosen pack run `scripts/packs.sh add <name>`; report the provenance/license line as
+you do. If the user picked the Jira-integrated backlog model in Step 1, suggest the
+agile pack when it's available. Custom repos are allowed
+(`scripts/packs.sh add <name> <url>`) but tell the user they're outside the curated
+registry.
 
 ## Step 2 — First project
 

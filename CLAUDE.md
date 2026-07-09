@@ -52,7 +52,12 @@ both repos.
   shortest path.
 - Keep notes focused; split when a note outgrows one idea. Never commit secrets.
 - **Instance data never enters this repo** — repo names, tracker ids, machine paths,
-  business context, promoted knowledge all belong in the instance.
+  business context, promoted knowledge all belong in the instance. **This applies to git
+  metadata too, not just file content:** commit messages, PR titles/bodies, and issue
+  references must never carry tracker IDs (e.g. Jira keys) or other instance
+  identifiers — describe the change in plain language instead. This repo is public;
+  commit history is permanent. Reference tracker IDs only in the private instance's own
+  mirror/notes, never here.
 
 ## Entry points
 

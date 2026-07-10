@@ -55,41 +55,38 @@ coordination patterns), [`templates/`](templates/).
 - **Python 3** — optional; only used by the [`graphify`](skills/graphify/) skill, which
   self-installs its one dependency (`pip install graphifyy`) the first time it runs.
   Nothing to install up front.
-- **git** (+ [`gh`](https://cli.github.com/), optional) — to clone the two repos below.
+- **git** (+ [`gh`](https://cli.github.com/), optional) — to clone your instance below.
 
-## Setting up the two repos
+## Setting up an instance
 
-`meta-os` (this repo) and your private instance must sit **as siblings** in the same
-parent folder — the instance's `skills/`, `systems/`, `templates/`, `agents/` are
-relative symlinks (`../meta-os/...`).
+You don't clone this repo directly — you create a **private instance** from
+[meta-os-instance-template](https://github.com/mova77/meta-os-instance-template) and the
+framework comes with it as the `.meta-os` git submodule. **One clone and you're
+running:**
 
 ```bash
-mkdir agentic-os && cd agentic-os
+# 1. create your private instance from the template
+gh repo create <you>/<instance-name> --template mova77/meta-os-instance-template --private
 
-# 1. the public framework
-git clone git@github.com:mova77/meta-os.git
-
-# 2. your private instance — from the template (fastest)
-gh repo create <you>/<instance>-os --template mova77/meta-os-instance-template --private --clone
-cd <instance>-os
+# 2. clone it — the framework lands in .meta-os/ at a pinned version, mounts pre-wired
+git clone --recursive git@github.com:<you>/<instance-name>.git
+cd <instance-name>
 ```
 
-No `gh` / prefer to build it by hand? Create a private repo with `CLAUDE.md`,
-`_index.md`, `projects/`, `memory/{raw,wiki,output}/`, `automations/`, `vaults/`, then
-symlink `skills/ systems/ templates/ agents/` to `../meta-os/<same name>`.
+That's the default (**single-clone**) mode. Framework developers can instead point the
+mounts at a sibling `../meta-os` checkout — see [`systems/distribution.md`](systems/distribution.md)
+for all consumption modes (single-clone, sibling, and the planned container image), and
+why the framework and instance stay separate repos.
 
 Then:
 
-1. Open `<instance>-os/` (**not** `meta-os/`) as your Obsidian vault — wikilinks resolve
-   across both repos since they're vault-root-relative.
-2. Fill in the new repo's `CLAUDE.md` / `_index.md` with your instance facts.
-3. *(optional)* machine-global skill discovery in Claude Code:
-   ```bash
-   for s in ../meta-os/skills/*/; do ln -s "$(pwd)/$s" ~/.claude/skills/"$(basename "$s")"; done
-   ```
-4. In Claude Code, run the [`bootstrap-instance`](skills/bootstrap-instance/SKILL.md)
+1. Open `<instance-name>/` as your Obsidian vault — wikilinks resolve across the
+   framework mount since they're vault-root-relative (`.meta-os/` stays out of the graph).
+2. Rename `{{instance-name}}` and fill in `CLAUDE.md` / `_index.md` with your instance facts.
+3. In Claude Code, run the [`bootstrap-instance`](skills/bootstrap-instance/SKILL.md)
    skill — a one-time onboarding conversation that decides your backlog/tracking model
-   (none / local JSON / Jira-integrated), registers your first project, and optionally
+   (none / local JSON / Jira-integrated), offers **skill packs** to mount
+   ([`systems/packs.md`](systems/packs.md)), registers your first project, and optionally
    wires up its GitHub repo.
 
 ## Conventions

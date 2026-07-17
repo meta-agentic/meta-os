@@ -42,6 +42,16 @@ note_types:
     location: "memory/wiki/skills/"
     template: templates/skill-learnings.md
     required: [type, skill, tags]
+  note:
+    description: >
+      General promoted knowledge — project summaries, decisions, cross-cutting facts.
+      Use when a note doesn't fit source (external research), skill-note, or
+      skill-learnings.
+    location: "memory/wiki/"
+    template: templates/note.md
+    required: [type, tags]
+    # project: optional backlink to the projects/ node this knowledge concerns.
+    optional: [project]
   heartbeat:
     description: Scheduled OS self-check capture — anomalies observed, filed to raw.
     location: "memory/raw/"

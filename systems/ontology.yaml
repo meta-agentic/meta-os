@@ -110,6 +110,9 @@ automations:
   run_log:
     path: automations/runs.jsonl
     entry: { automation: "name matching the table row", ts: "ISO-8601", outcome: "ok | fail", note: "optional" }
+  event_log:
+    path: automations/events.jsonl
+    entry: { ts: "ISO-8601", actor: "agent or human who acted", action: "what happened", target: "what it acted on", note: "optional" }
 
 # Graph-layer vocabulary (graphify). Kept here so vault and graph share one contract.
 graph:

@@ -37,7 +37,7 @@ decides *which CLI process* runs.
 | **Single alternate** | `meta run -p gemini\|grok\|…` | Provider-specific strength, cost, or availability |
 | **Cross-provider fan-out** | `meta fan -p claude,gemini,grok` | Independent opinions / research diversity |
 | **Same-provider workers** | `meta fan -p claude --workers N` | Parallel independent slices (prefer worktrees for code) |
-| **In-session swarm** | Ruflo / swarm skills / dual-mode | Coordinated multi-agent with shared memory |
+| **In-session swarm** | Ruflo / swarm skills | Coordinated multi-agent with shared memory |
 
 ## Adapter contract
 
@@ -119,10 +119,3 @@ provider in config. See [[systems/interface-layer]].
 | Swarm topology, memory_search, hooks | Ruflo / host engine |
 | Domain process (Scrum, pack skills) | packs + skills |
 | Dashboard UI | meta-os-dashboard |
-
-## Evolution of dual-mode
-
-[[skills/dual-mode/README|dual-mode]] was Claude + Codex hybrid and is provenance-unverified.
-**multi-engine** supersedes it as the standing multi-provider surface. Keep dual-mode
-docs as historical/optional until verified or removed; new work should use multi-engine +
-meta-cli.

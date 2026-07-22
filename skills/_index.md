@@ -27,7 +27,6 @@ whole library — never create a second real copy; discovery is via symlinks.
 | [[skills/verification-quality/SKILL\|verification-quality]] | Quality | Truth scoring, quality gates, automatic rollback |
 | [[skills/reasoningbank-intelligence/SKILL\|reasoningbank-intelligence]] | Learning | Trajectory tracking, pattern distillation, adaptive learning |
 | [[skills/multi-engine/SKILL\|multi-engine]] | Meta | Cross-provider headless fan-out via meta-cli (`claude`/`gemini`/`grok`/…); collect → `memory/raw/` — see [[systems/engine]] |
-| [[skills/dual-mode/README\|dual-mode]] | Meta | ⚠️ Superseded by multi-engine for multi-provider work; Claude+Codex hybrid, unverified provenance — [PROVENANCE](../PROVENANCE.md) |
 
 ## Library — full catalog
 

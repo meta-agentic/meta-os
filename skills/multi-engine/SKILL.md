@@ -1,6 +1,6 @@
 ---
 name: multi-engine
-description: "Fan-out headless agent runs across claude/gemini/grok (and other adapters) via meta-cli, then collect results into memory/raw. Use for cross-provider review/diversity, parallel research, or same-provider worker batches — not for every task. Supersedes dual-mode for multi-provider work."
+description: "Fan-out headless agent runs across claude/gemini/grok (and other adapters) via meta-cli, then collect results into memory/raw. Use for cross-provider review/diversity, parallel research, or same-provider worker batches — not for every task. The standing multi-provider surface."
 ---
 
 # Multi-Engine
@@ -87,10 +87,6 @@ When the user asks to “run this on claude and gemini” or “fan out to all e
 4. After completion, `meta collect --to memory/raw` when working inside an instance.
 5. Summarize differences between providers in the chat; do not paste entire stdout dumps unless asked.
 6. Never enable `--yolo` unless the user explicitly wants auto-approve and understands the risk.
-
-## Relationship to dual-mode
-
-[[skills/dual-mode/README|dual-mode]] (Claude + Codex hybrid) is **superseded** for multi-provider work by this skill + meta-cli. dual-mode remains in the tree with unverified provenance — do not expand it; point new work here.
 
 ## Artifacts
 

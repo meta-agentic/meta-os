@@ -15,7 +15,6 @@ noted below. Last verified: 2026-07-04.
 | `sparc-methodology`, `swarm-advanced`, `swarm-orchestration`, `stream-chain`, `hooks-automation`, `pair-programming`, `verification-quality`, `reasoningbank-agentdb`, `reasoningbank-intelligence`, `browser`, `skill-builder` | [claude-flow / Ruflo](https://github.com/ruvnet/claude-flow) | MIT | Core claude-flow skill set |
 | `graphify` | [Graphify Labs](https://github.com/safishamsi/graphify) · [graphify.net](https://graphify.net) — safishamsi | MIT | Vendored at v0.9.5 (2026-07-04). Update via `pip install -U graphifyy && graphify install --platform claude` — writes through the `~/.claude/skills/graphify` symlink into this repo |
 | `agile-process`, `agile-swarm` | **Original** — this project; **moved** to [meta-os-agile-pack](https://github.com/mova77/meta-os-agile-pack) | MIT | Extracted from core when the skill library was slimmed to generic-only; mount as the `agile` pack |
-| `dual-mode` | **Unverified** — arrived with the claude-flow batch; no public upstream match found | presumed MIT | ⚠️ Superseded by `multi-engine` for multi-provider work; verify or remove |
 | `multi-engine` | **Original** — this project; invokes sibling [meta-cli](https://github.com/meta-aos/meta-cli) | MIT | Standing multi-provider surface; see `systems/engine.md` |
 
 ## Framework docs

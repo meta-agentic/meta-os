@@ -5,7 +5,7 @@
 > redistributing or relying on it in critical workflows. See [PROVENANCE.md](../../PROVENANCE.md).
 >
 > **Superseded for multi-provider work** by [[skills/multi-engine/SKILL|multi-engine]] +
-> [meta-cli](https://github.com/mova77/meta-cli) and [[systems/engine]]. Prefer those for
+> [meta-cli](https://github.com/meta-aos/meta-cli) and [[systems/engine]]. Prefer those for
 > new Claude/Gemini/Grok fan-out. Keep dual-mode only if you specifically need the old
 > Codex-oriented skill surface until it is verified or removed.
 

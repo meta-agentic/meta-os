@@ -89,6 +89,137 @@ Then:
    ([`systems/packs.md`](systems/packs.md)), registers your first project, and optionally
    wires up its GitHub repo.
 
+## Memory topologies
+
+`raw → wiki → output` is the invariant. **Where those folders live — and how they nest —
+is your choice**, because adopters arrive from very different places:
+
+- a **clean slate**, wanting one self-contained repo;
+- an **existing estate** whose repos already carry their own docs, where nothing should move;
+- a preference to **centralize** every project's memory in one place.
+
+All three are first-class. The layout is declared as data, and the tooling (dashboard,
+graph, sync scripts) reads that declaration instead of assuming a shape. **Write nothing
+and you get the simplest option** — see [Defaults](#defaults-and-changing-your-mind).
+
+### Choice 1 — where the bytes live
+
+Each storage location is a **root**:
+
+| Root style | Bytes live in | Best when |
+|---|---|---|
+| **In-instance** | the instance repo itself | Clean slate. One clone is complete — fully portable, works on mobile Obsidian, trivial to back up. |
+| **Shared vault repo** | one separate repo, all projects | You want the instance small, and one history covering all knowledge. |
+| **In the project repos** | each project's own repo | Brownfield. Docs are authored and reviewed alongside their code and must not move. |
+
+You can mix them — most mature estates do.
+
+### Choice 2 — how each root nests
+
+Each root declares its own `layout`:
+
+```
+"flat"                    "tier/project"            "project/tier"
+
+memory/                   memory/                   memory/
+├── raw/                  ├── raw/                  ├── alpha/
+│   └── note.md           │   ├── alpha/            │   ├── raw/
+├── wiki/                 │   └── beta/             │   ├── wiki/
+│   └── topic.md          ├── wiki/                 │   └── output/
+└── output/               │   ├── alpha/            └── beta/
+    └── report.md         │   └── beta/                 ├── raw/
+                          └── output/                   ├── wiki/
+                              ├── alpha/                └── output/
+                              └── beta/
+```
+
+| Layout | Pick it when your common question is… |
+|---|---|
+| `flat` | *"what's in my vault?"* — one project, or no need for per-project separation. Simplest. |
+| `tier/project` | *"what's in flight across **everything**?"* — one glob per stage. Suits daily cross-project standups. |
+| `project/tier` | *"everything about **project X**"* — and it keeps a project's memory trivially extractable if it's ever spun out. |
+
+Nothing stops you changing later; it's a directory move plus a one-line config edit.
+
+### Canon vs. navigation
+
+Two kinds of mount, and the difference is load-bearing:
+
+- **`roots` are canon** — counted as your promotion pipeline. Progress is measured here.
+- **`federated` are navigation** — mounted so they appear in the graph and are reported as
+  *context*, but never counted as pipeline progress.
+
+This is the framework's promotion rule expressed as configuration: federation gives you
+**one graph without moving a single file**; promotion is what makes knowledge **canon**.
+A brownfield estate can therefore adopt the OS on day one — mount everything, move
+nothing — and promote deliberately over time. See
+[`systems/memory-layer.md`](systems/memory-layer.md).
+
+### Worked examples
+
+**A · Clean slate** — everything in the instance, no per-project split. This is the
+default; the block is shown only to make it explicit.
+
+```jsonc
+"memory": {
+  "roots": [
+    { "label": "instance", "path": "${instance}/memory", "layout": "flat" }
+  ]
+}
+```
+
+**B · Brownfield** — a small in-instance pipeline for your own notes, with existing
+project repos mounted read-only for navigation. Nothing moves out of those repos.
+
+```jsonc
+"memory": {
+  "roots": [
+    { "label": "instance", "path": "${instance}/memory", "layout": "flat" }
+  ],
+  "federated": [
+    { "label": "platform-docs", "path": "${code}/platform/docs" },
+    { "label": "research-vault", "path": "${code}/research/vault" }
+  ]
+}
+```
+
+**C · Centralized** — one shared vault repo holds every project's memory, nested
+stage-first because the daily question is cross-project.
+
+```jsonc
+"memory": {
+  "roots": [
+    { "label": "estate", "path": "${code}/vault", "layout": "tier/project" }
+  ]
+}
+```
+
+**D · Hybrid** — what estates tend to converge on: a central vault for canon, plus
+federated project docs for navigation.
+
+```jsonc
+"memory": {
+  "roots": [
+    { "label": "estate",   "path": "${code}/vault",       "layout": "tier/project" },
+    { "label": "instance", "path": "${instance}/memory",  "layout": "flat" }
+  ],
+  "federated": [
+    { "label": "platform-docs", "path": "${code}/platform/docs" }
+  ]
+}
+```
+
+`${...}` entries are reusable path variables, so relocating a checkout is a one-line change.
+
+### Defaults and changing your mind
+
+- **No `memory` block at all** → flat, in-instance (`<instance>/memory/{raw,wiki,output}`)
+  plus anything symlinked under `vaults/` treated as federated. Example A, without writing it.
+- **Adding a block never breaks an existing instance** — absent keys fall back to that default.
+- **Switching layout later** is `git mv` plus a config edit. Because promotion moves a file
+  between stage folders, `git log --follow` on any note replays its whole
+  `raw → wiki → output` history — a property worth preserving whichever layout you pick.
+
 ## Conventions
 
 - Every folder has an `_index.md` table of contents — update it when you add a file.

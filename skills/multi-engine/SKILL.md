@@ -5,7 +5,7 @@ description: "Fan-out headless agent runs across claude/gemini/grok (and other a
 
 # Multi-Engine
 
-Cross-provider (and multi-worker) headless runs using **[meta-cli](https://github.com/meta-aos/meta-cli)** (`meta`). Implements the contract in [[systems/engine]].
+Cross-provider (and multi-worker) headless runs using **[meta-cli](https://github.com/meta-agentic/meta-cli)** (`meta`). Implements the contract in [[systems/engine]].
 
 **Scope:** process fan-out only. In-session swarms, shared AgentDB memory, and SendMessage coordination stay with Ruflo / the host engine — see [[skills/swarm-orchestration/SKILL|swarm-orchestration]].
 

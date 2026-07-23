@@ -70,7 +70,7 @@ in `memory/raw/` or `output/` per normal discipline — the dashboard displays r
 never owns them.
 
 **Default adapter** remains Claude (`claude -p "<prompt>"`). Prefer the pluggable form
-via [meta-cli](https://github.com/meta-aos/meta-cli) when multi-provider or configured
+via [meta-cli](https://github.com/meta-agentic/meta-cli) when multi-provider or configured
 routing is needed:
 
 ```text

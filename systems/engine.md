@@ -8,7 +8,7 @@ The OS needs a process that can take a prompt and produce work. That process is 
 **engine**. Claude Code is the **default adapter**, not the only one.
 
 This note is the contract. The process multiplexer that implements it is the sibling
-tool **[meta-cli](https://github.com/meta-aos/meta-cli)** (`meta`). In-session multi-agent
+tool **[meta-cli](https://github.com/meta-agentic/meta-cli)** (`meta`). In-session multi-agent
 coordination (swarms, memory, hooks) stays with Ruflo / the host engine — `meta` only
 decides *which CLI process* runs.
 

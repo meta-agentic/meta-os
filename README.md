@@ -39,7 +39,7 @@ a fully supported install.
    your instance.
 3. **Interface** — the Obsidian graph, plus an optional dashboard: see
    [`systems/interface-layer.md`](systems/interface-layer.md) for the contract and
-   [meta-os-dashboard](https://github.com/mova77/meta-os-dashboard) for a reference
+   [meta-os-dashboard](https://github.com/meta-agentic/meta-os-dashboard) for a reference
    implementation (sprint lanes, a live knowledge graph, memory pipeline, ontology
    linting). [`systems/ontology.md`](systems/ontology.md) defines the shared vocabulary
    layers 2 and 3 read from.
@@ -52,7 +52,7 @@ coordination patterns), [`templates/`](templates/).
 - **[Claude Code](https://claude.com/claude-code)** — required (default engine); runs the skills and reads `CLAUDE.md`.
 - **[Obsidian](https://obsidian.md)** — optional; lets you browse the vault as a graph.
   Everything works from Claude Code alone without it.
-- **[meta-cli](https://github.com/meta-aos/meta-cli)** — optional; multi-engine headless fan-out
+- **[meta-cli](https://github.com/meta-agentic/meta-cli)** — optional; multi-engine headless fan-out
   (`claude` / `gemini` / `grok` / …). Contract: [`systems/engine.md`](systems/engine.md);
   skill: [`skills/multi-engine/`](skills/multi-engine/).
 - **Python 3** — optional; only used by the [`graphify`](skills/graphify/) skill, which
@@ -63,13 +63,13 @@ coordination patterns), [`templates/`](templates/).
 ## Setting up an instance
 
 You don't clone this repo directly — you create a **private instance** from
-[meta-os-instance-template](https://github.com/mova77/meta-os-instance-template) and the
+[meta-os-instance-template](https://github.com/meta-agentic/meta-os-instance-template) and the
 framework comes with it as the `.meta-os` git submodule. **One clone and you're
 running:**
 
 ```bash
 # 1. create your private instance from the template
-gh repo create <you>/<instance-name> --template mova77/meta-os-instance-template --private
+gh repo create <you>/<instance-name> --template meta-agentic/meta-os-instance-template --private
 
 # 2. clone it — the framework lands in .meta-os/ at a pinned version, mounts pre-wired
 git clone --recursive git@github.com:<you>/<instance-name>.git

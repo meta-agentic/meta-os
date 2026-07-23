@@ -6,7 +6,7 @@ description: "Interactive first-run setup for a freshly-created meta-os instance
 # Bootstrap Instance
 
 A brand-new instance repo (cloned from
-[meta-os-instance-template](https://github.com/mova77/meta-os-instance-template) or
+[meta-os-instance-template](https://github.com/meta-agentic/meta-os-instance-template) or
 built by hand) is structurally correct but has **zero decisions made** — no backlog
 model chosen, no first project, no `CLAUDE.md` facts filled in. This skill runs that
 onboarding conversation once, so the estate starts from a real decision instead of an

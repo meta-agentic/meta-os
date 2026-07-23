@@ -74,11 +74,21 @@ via [meta-cli](https://github.com/meta-aos/meta-cli) when multi-provider or conf
 routing is needed:
 
 ```text
-meta run -p <claude|gemini|grok|…> -- "<prompt>"
+meta run --engine <auto|cli|acp> -p <claude|gemini|grok|…> -- "<prompt>"
 ```
 
-Engine contract and fan-out rules: [[systems/engine]]. Multi-provider collect skill:
-[[skills/multi-engine/SKILL|multi-engine]].
+The trigger surface is still **one mechanism**, but the run can pick a **lane**: a
+one-shot **CLI** subprocess, or a warm **ACP** session that persists across runs. The
+dashboard leaves `--engine auto` unless the operator selects a lane; a persistent ACP run
+resumes from state the framework keeps as **OS memory** — its session summary and
+`session_id` land in `memory/raw/` on collect, not in an opaque adapter store. So a warm
+run is still just "a run whose result is in the vault," and the dashboard displays it like
+any other. Engine contract, the two lanes, and quota-probe surface: [[systems/engine]].
+Multi-provider collect skill: [[skills/multi-engine/SKILL|multi-engine]].
+
+One control-plane consequence: adapters only **probe** quota (`getQuotaWindows`);
+**enforcement** — budget hard-stops, auto-pause — is the interface layer's job, reading
+that probe. The engine layer deliberately holds no budget logic.
 
 ## MVP order
 

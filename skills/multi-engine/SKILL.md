@@ -9,6 +9,16 @@ Cross-provider (and multi-worker) headless runs using **[meta-cli](https://githu
 
 **Scope:** process fan-out only. In-session swarms, shared AgentDB memory, and SendMessage coordination stay with Ruflo / the host engine — see [[skills/swarm-orchestration/SKILL|swarm-orchestration]].
 
+**Two lanes.** Each run picks *how* the engine process runs, via `--engine`:
+
+| `--engine` | Lane | Session |
+|------------|------|---------|
+| `cli` | Spawn the provider CLI (default behaviour) | Cold per run |
+| `acp` | [Agent Client Protocol](https://agentclientprotocol.com) agent over stdio | **Warm, persistent** — state resumes across runs |
+| `auto` *(default)* | ACP if its prerequisites pass, else CLI with a recorded diagnostic | Whichever lane ran |
+
+The lane is orthogonal to fan-out — `meta fan --engine acp` warm-fans, `meta run --engine cli` is a one-shot. The full contract (capability set, selection semantics, prerequisites) is [[systems/engine]].
+
 ## When to use
 
 | Use multi-engine | Do not |
@@ -22,9 +32,12 @@ Cross-provider (and multi-worker) headless runs using **[meta-cli](https://githu
 1. `meta` on `PATH` (`ln -sf <repo>/bin/meta ~/.local/bin/meta`)
 2. At least one adapter binary installed (`claude`, `gemini`, `grok`, …)
 3. For vault collect: run from the **instance** root (or pass an absolute `--to`)
+4. For the **ACP lane** only: Node ≥ 22.12 and the provider's ACP agent command
+   (`claude-code-acp` for claude, override with `META_<PROVIDER>_ACP`). Absent → `auto`
+   uses CLI; explicit `--engine acp` fails loudly.
 
 ```bash
-meta which
+meta which   # shows each provider's CLI status and whether its ACP lane is available
 ```
 
 ## Workflow
@@ -50,6 +63,21 @@ meta fan -p claude --workers 3 -C . -- \
 ```
 
 Prefer **worktree isolation** for code-writing workers (engine `--worktree` or [[systems/swarm-harness]]).
+
+### 3b. Warm ACP session (persistent lane)
+
+```bash
+# auto: uses ACP when Node ≥ 22.12 + the agent are present, else CLI (recorded)
+meta run --engine auto -p claude -C . -- "Start the audit; keep the session warm."
+
+# explicit ACP; fails loudly if prerequisites are missing
+meta run --engine acp  -p claude -C . -- "Continue where the last run left off."
+```
+
+The ACP lane keeps the agent warm and serializes the session under the run's `state/`.
+On collect, the session summary and its `session_id` land in `memory/raw/` — cross-tick
+state becomes OS memory, not opaque adapter storage (the memory-as-state-store model in
+[[systems/engine]]). The next run resumes from that handle.
 
 ### 4. Dry-run (plan only)
 
@@ -87,6 +115,10 @@ When the user asks to “run this on claude and gemini” or “fan out to all e
 4. After completion, `meta collect --to memory/raw` when working inside an instance.
 5. Summarize differences between providers in the chat; do not paste entire stdout dumps unless asked.
 6. Never enable `--yolo` unless the user explicitly wants auto-approve and understands the risk.
+7. Leave `--engine auto` unless the user wants a specific lane. Reach for `--engine acp`
+   only when a run should resume warm state from a prior run; use `--engine cli` to force
+   the subprocess lane. Explicit `acp` fails loudly if prerequisites are absent — that is
+   intended, not a bug to work around.
 
 ## Artifacts
 

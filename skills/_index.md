@@ -14,8 +14,8 @@ whole library — never create a second real copy; discovery is via symlinks.
 
 | Skill | Domain | Use for |
 |-------|--------|---------|
-| [[skills/agile-process/SKILL\|agile-process]] | Process | **→ moved to the [agile pack](https://github.com/mova77/meta-os-agile-pack)** — mount with `scripts/packs.sh add agile`; link resolves in instances with the pack mounted |
-| [[skills/agile-swarm/SKILL\|agile-swarm]] | Process | **→ moved to the [agile pack](https://github.com/mova77/meta-os-agile-pack)** — same mount; deprecation rows kept for one minor version |
+| [[skills/agile-process/SKILL\|agile-process]] | Process | **→ moved to the [agile pack](https://github.com/meta-agentic/meta-discipline-agile)** — mount with `scripts/packs.sh add agile`; link resolves in instances with the pack mounted |
+| [[skills/agile-swarm/SKILL\|agile-swarm]] | Process | **→ moved to the [agile pack](https://github.com/meta-agentic/meta-discipline-agile)** — same mount; deprecation rows kept for one minor version |
 | [[skills/graphify/SKILL\|graphify]] | Memory | Turn any folder (code/docs/papers/media) into a navigable knowledge graph |
 | [[skills/skill-builder/SKILL\|skill-builder]] | Meta | Author new skills with correct frontmatter + progressive disclosure |
 | [[skills/pack-builder/SKILL\|pack-builder]] | Meta | Author a new pack: apply the is-it-a-pack test, structure (pack.yaml/profiles), parameterise, provenance/registry, verify by mounting — see [[systems/pack-strategy]] |

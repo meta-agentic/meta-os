@@ -6,7 +6,7 @@ version: 1
 
 packs:
   agile:
-    repo: https://github.com/mova77/meta-os-agile-pack
+    repo: https://github.com/meta-agentic/meta-discipline-agile
     ref: main
     description: "Scrum harness for an agentic estate: agile-process (backlog/Jira mirror, ceremonies) and agile-swarm (multi-lane sprint execution). First-party, extracted from the framework core."
     provenance: first-party
@@ -49,7 +49,7 @@ packs:
                       # pack may end up an attributed mirror pinned at upstream)
 
   software-engineering:
-    repo: https://github.com/mova77/meta-os-swe-pack
+    repo: https://github.com/meta-agentic/meta-discipline-swe
     ref: main
     description: "Software-engineering & OOD discipline: design principles applied in review context (SOLID/GRASP, composition), ADR discipline, design reviews. First-party."
     provenance: first-party

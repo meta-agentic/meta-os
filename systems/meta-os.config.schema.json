@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/meta-agentic/meta-os/blob/main/systems/meta-os.config.schema.json",
+  "title": "meta-os.config.json — instance estate configuration",
+  "description": "Schema for a meta-os instance's estate config (meta-os.config.json): the estate knowledge an adopter declares — variable prefixes, backlog mirrors, and memory topology. This is the FRAMEWORK level: valid keys, valid enum values, and defaults, carrying ZERO values. Deployment concerns (instanceRoot, frameworkRoot, github.*, auth, corsOrigins, claudeHome, dataDir) live in the dashboard's instance.config.json, not here. Every key is optional; omitting the file yields default behaviour.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "vars": {
+      "type": "object",
+      "description": "Reusable string prefixes. ${name} in any config value (or a projects/*.md 'path:') expands to these, so a repo-root move is a one-line change.",
+      "additionalProperties": { "type": "string" }
+    },
+    "backlogs": {
+      "type": "array",
+      "description": "Backlog mirrors this instance tracks, one per space/project.",
+      "items": {
+        "type": "object",
+        "required": ["space", "path"],
+        "additionalProperties": false,
+        "properties": {
+          "space": { "type": "string", "description": "Space/project key (e.g. the tracker project id)." },
+          "path": { "type": "string", "description": "Backlog source — a per-item raw/ directory (post-migration) or a legacy backlog.json. ${var} expands." }
+        }
+      }
+    },
+    "memory": {
+      "type": "object",
+      "description": "Configurable memory topology. Omit the whole block for the default: the instance's own memory/{raw,wiki,output} as the sole canon root plus vaults/* as federated mounts (byte-for-byte the prior behaviour). ${var} expands in paths. A broken/dangling path is skipped and reported, never fatal.",
+      "additionalProperties": false,
+      "properties": {
+        "roots": {
+          "type": "array",
+          "description": "Canon roots — counted AS the raw->wiki->output pipeline (promotable). Each declares a layout.",
+          "items": {
+            "type": "object",
+            "required": ["label", "path", "layout"],
+            "additionalProperties": false,
+            "properties": {
+              "label": { "type": "string", "description": "Human label, e.g. \"instance\" or \"estate\"." },
+              "path": { "type": "string", "description": "Root path. ${var} expands." },
+              "layout": {
+                "type": "string",
+                "enum": ["flat", "tier/project", "project/tier"],
+                "description": "flat = {raw,wiki,output} at the root. tier/project = {raw,wiki,output}/<project> — favours cross-project browsing on a directly-read root. project/tier = <project>/{raw,wiki,output} — favours per-project ownership and clean extraction, and is REQUIRED when the root is federated one-symlink-per-project (a project must map to a single mountable directory)."
+              }
+            }
+          }
+        },
+        "federated": {
+          "type": "array",
+          "description": "Federated mounts — surfaced in the graph for navigation/context, NEVER counted as canon.",
+          "items": {
+            "type": "object",
+            "required": ["label", "path"],
+            "additionalProperties": false,
+            "properties": {
+              "label": { "type": "string", "description": "Human label for the mount." },
+              "path": { "type": "string", "description": "Mount source path. ${var} expands." }
+            }
+          }
+        }
+      }
+    }
+  }
+}

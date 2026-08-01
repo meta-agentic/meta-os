@@ -36,7 +36,7 @@ whole library — never create a second real copy; discovery is via symlinks.
 | **github-*** | code-review · multi-repo · project-management · release-management · workflow-automation |
 | **v3-*** | cli-modernization · core-implementation · ddd-architecture · integration-deep · mcp-optimization · memory-unification · performance-optimization · security-overhaul · swarm-coordination |
 | **flow-nexus-*** | neural · platform · swarm |
-| **misc** | browser · reasoningbank-agentdb · sparc-methodology · swarm-advanced |
+| **misc** | browser · reasoningbank-agentdb · ruflo-setup · sparc-methodology · swarm-advanced |
 
 Promote a library skill into the core table when it becomes part of the standing operating
 model; prune it when it proves dead weight.

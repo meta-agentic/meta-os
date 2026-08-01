@@ -62,6 +62,28 @@ optional; the file may be omitted entirely (defaults apply). Shape:
 - **`${var}` expansion** works in every path, exactly as it does for `backlogs`.
 - **A broken/dangling root or federated path** is skipped and reported, never fatal.
 
+## Precedence — worked example
+
+Lower levels set defaults; higher levels override. **Framework < instance < deployment.**
+
+1. **Framework** ships no memory topology at all — the *documented default* (no
+   `meta-os.config.json`, or a `meta-os.config.json` with no `memory` block) is: the
+   instance's own `memory/{raw,wiki,output}` as the sole canon root, `vaults/*` as
+   federated mounts.
+2. **Instance** (`meta-os.config.json`) overrides that default by declaring a second
+   canon root — e.g. a shared per-project vault repo with `layout: "project/tier"` —
+   because this adopter's backlog lives outside the instance's own `memory/` folder.
+   This is estate knowledge: it belongs to the adopter, not to any one machine.
+3. **Deployment** (`instance.config.json`) overrides a *path*, never the topology
+   shape — e.g. a second machine checks out the estate at a different filesystem root,
+   so its `instance.config.json` repoints `instanceRoot`/`frameworkRoot` without
+   touching the instance's `meta-os.config.json` at all. *Which* roots exist and *what*
+   they mean travels with the instance; *where they sit on disk* is a deployment
+   concern.
+
+Net effect: an adopter with one estate and N deployments (laptop, server, CI) declares
+the topology once, in the instance, and each deployment only ever overrides paths.
+
 ## Back-compat
 
 An existing single `instance.config.json` that still carries estate keys keeps working — the

@@ -81,8 +81,34 @@ instance.
 Federation is for **navigation**; promotion is for **canon**: cross-project-durable
 knowledge still gets promoted into the instance `wiki/`. Single source of truth per fact.
 
-## Relationship to agent memory
+## Files are the substrate — indexes are derived
 
-Runtime agent memory (ReasoningBank / AgentDB, the `.swarm/` stores) is *operational* — it
-learns trajectories and patterns. This vault is *editorial* — human-curated knowledge.
-Promote insights worth keeping from the former into the latter; don't conflate them.
+**The files are the memory.** Plain markdown in git, readable and diffable with no runtime,
+no daemon, and no database. That is not an implementation detail of this OS; it is the
+point of it. Knowledge that outlives the tooling has to be stored in a form that outlives
+the tooling.
+
+Everything else that holds memory — ReasoningBank / AgentDB, the `.swarm/` stores, HNSW and
+vector indexes, the graphify output — is a **derived index over those files**. Indexes exist
+to make recall *fast*: semantic search, nearest-neighbour lookup, graph traversal. That is
+their whole job.
+
+Three rules follow, and they are load-bearing:
+
+1. **An index must be deletable.** It must be safe to `rm` any store at any moment and
+   rebuild it from the files. If deleting an index loses knowledge, the knowledge was put in
+   the wrong place — write it to `wiki/` and re-derive.
+2. **Nothing is authoritative only in an index.** A fact that exists solely in a vector store
+   is not yet knowledge; it is a cache entry. Promote it (see above) or accept losing it.
+3. **A stale or missing index is a performance regression, never data loss.** Recall gets
+   slower and dumber; nothing becomes unknowable. Diagnose it as you would a cold cache.
+
+This is a deliberate inversion of how the vendored `agentdb-*` and `reasoningbank-*` skills
+describe things — they come from claude-flow (see [[PROVENANCE]]) and treat AgentDB as the
+store of record. Inside meta-os it is not. Read those skills for their techniques, not for
+their memory model.
+
+The older distinction still holds beneath this one: runtime agent memory is *operational* —
+it learns trajectories and patterns — while this vault is *editorial*, human-curated
+knowledge. Promote what is worth keeping from the former into the latter. Don't conflate
+them, and don't let the fast thing become the true thing.

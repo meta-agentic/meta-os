@@ -2,20 +2,27 @@
 
 Origin and license of every skill in `skills/`. The repository as a whole is MIT
 ([LICENSE](LICENSE)); third-party-derived content remains under its original MIT copyright,
-noted below. Last verified: 2026-07-04.
+noted below. Last verified: 2026-08-02.
 
 ## Skill provenance
 
 | Skill(s) | Origin | License | Notes |
 |----------|--------|---------|-------|
-| `agentdb-*` (5) | [claude-flow / Ruflo](https://github.com/ruvnet/claude-flow) — rUv (ruvnet) | MIT | Installed via the claude-flow ecosystem |
-| `v3-*` (9) | [claude-flow / Ruflo](https://github.com/ruvnet/claude-flow) | MIT | claude-flow v3 implementation skills |
-| `flow-nexus-*` (3) | [claude-flow / Ruflo](https://github.com/ruvnet/claude-flow) | MIT | Flow Nexus platform skills |
-| `github-*` (5) | [claude-flow / Ruflo](https://github.com/ruvnet/claude-flow) | MIT | GitHub swarm-coordination skills |
-| `sparc-methodology`, `swarm-advanced`, `swarm-orchestration`, `stream-chain`, `hooks-automation`, `pair-programming`, `verification-quality`, `reasoningbank-agentdb`, `reasoningbank-intelligence`, `browser`, `skill-builder` | [claude-flow / Ruflo](https://github.com/ruvnet/claude-flow) | MIT | Core claude-flow skill set |
+| `hooks-automation`, `swarm-orchestration`, `skill-builder` | [claude-flow / Ruflo](https://github.com/ruvnet/claude-flow) — rUv (ruvnet) | MIT | **Held back, 2026-08-02** — this repo's own docs (`agents/_index.md`, both `templates/skill-*.md`, `pack-builder`, `systems/interface-extensions.md`) still point to these as the canonical mechanism for coordination / hooks / skill-authoring. Kept as a flagged exception until a native replacement (or a decision to patch those docs) lands — not because they're exempt from the strip below. |
 | `graphify` | [Graphify Labs](https://github.com/safishamsi/graphify) · [graphify.net](https://graphify.net) — safishamsi | MIT | Vendored at v0.9.5 (2026-07-04). Update via `pip install -U graphifyy && graphify install --platform claude` — writes through the `~/.claude/skills/graphify` symlink into this repo |
 | `agile-process`, `agile-swarm` | **Original** — this project; **moved** to [meta-discipline-agile](https://github.com/meta-agentic/meta-discipline-agile) | MIT | Extracted from core when the skill library was slimmed to generic-only; mount as the `agile` pack (org: meta-agentic) |
 | `multi-engine` | **Original** — this project; invokes sibling [meta-cli](https://github.com/meta-agentic/meta-cli) | MIT | Standing multi-provider surface; see `systems/engine.md` |
+
+## Removed, 2026-08-02
+
+`agentdb-*` (5), `v3-*` (9), `flow-nexus-*` (3), `github-*` (5), `sparc-methodology`,
+`swarm-advanced`, `stream-chain`, `pair-programming`, `verification-quality`,
+`reasoningbank-agentdb`, `reasoningbank-intelligence`, `browser` — 30 skills, all
+[claude-flow / Ruflo](https://github.com/ruvnet/claude-flow) origin, MIT, zero
+cross-references elsewhere in this repo. Meta-os doesn't repackage third-party skills
+with provenance tracking — it now ships without them. If you want that tooling in an
+instance, install claude-flow/Ruflo through its own canonical installer (`ruflo init` /
+`npx @claude-flow/cli@latest init`), opt-in, outside this repo — not vendored here.
 
 ## Framework docs
 

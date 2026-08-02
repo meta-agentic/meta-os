@@ -59,5 +59,5 @@ coordination stays SendMessage / Ruflo.
 
 ## Quality gate
 
-Non-trivial work passes through a reviewer and [[skills/verification-quality/SKILL|verification-quality]] before it's
-considered done. Tests run after code changes; build must be green before a PR.
+Non-trivial work passes through a reviewer before it's considered done. Tests run after
+code changes; build must be green before a PR.

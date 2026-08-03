@@ -26,13 +26,13 @@ whole library — never create a second real copy; discovery is via symlinks.
 
 ## Library — full catalog
 
-Empty as of 2026-08-02: the vendored claude-flow/Ruflo skill set (agentdb-*, v3-*,
-flow-nexus-*, github-*, sparc-methodology, swarm-advanced, stream-chain,
-pair-programming, verification-quality, reasoningbank-agentdb,
-reasoningbank-intelligence, browser) was stripped from core — see [[PROVENANCE]]. This
-repo doesn't repackage third-party skills with provenance tracking; if you want that
-tooling, install claude-flow/Ruflo through its own canonical installer, opt-in, outside
-this repo.
+| Family | Skills |
+|--------|--------|
+| **agentdb-*** | advanced · learning · memory-patterns · optimization · vector-search |
+| **github-*** | code-review · multi-repo · project-management · release-management · workflow-automation |
+| **v3-*** | cli-modernization · core-implementation · ddd-architecture · integration-deep · mcp-optimization · memory-unification · performance-optimization · security-overhaul · swarm-coordination |
+| **flow-nexus-*** | neural · platform · swarm |
+| **misc** | browser · reasoningbank-agentdb · ruflo-setup · sparc-methodology · swarm-advanced |
 
 Promote a library skill into the core table when it becomes part of the standing operating
 model; prune it when it proves dead weight.

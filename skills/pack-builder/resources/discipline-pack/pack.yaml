@@ -1,0 +1,36 @@
+# <pack> pack — config schema (method vs. opinion; see meta-os/systems/packs.md).
+# Skills read config-first, fall back to these defaults. `scripts/packs.sh config <pack>`
+# resolves instance .packs.yaml `config:` over these and validates enums.
+# Contract: meta-os/systems/pack.schema.json — validate before publishing.
+version: 1
+name: <pack>
+description: "<Discipline> discipline (<N> skills): a <rigor spine — the cross-cutting method skills> plus <branch disciplines> — each emitting a checkable ledger. <Coverage anchored on … , if a reference taxonomy was used.>"
+provenance: first-party
+license: MIT
+
+# Optional — packs whose skills this pack's skills assume rather than duplicate.
+# Names only: a mounted pack is a pinned submodule, so the pin IS the version.
+# depends:
+#   - name: <other-pack>
+#     for: [<skill-it-consumes>]
+#     reason: "<what would otherwise be duplicated>"
+
+# Optional — the skill names other packs may depend on. A collision on a provided
+# name is an error, not a warning.
+# provides: [<skill-a>, <skill-b>]
+
+config:
+  profile:
+    default: <default-profile>
+    one_of: <profile-a> | <profile-b>
+    doc: "<What the profiles select — a rigor bundle, not a preference.>"
+  <knob>:
+    default: <value>
+    one_of: <a> | <b>
+    doc: "<What this key means and what each value does. Quote 'off'/'on'/'no'/'yes' — YAML coerces them to booleans.>"
+
+# Omit `profiles:` entirely when the discipline has no genuine variants. Do NOT invent a
+# split to look like the other packs — state the absence in the README instead.
+profiles:
+  <profile-a>: profiles/<profile-a>.md
+  <profile-b>: profiles/<profile-b>.md

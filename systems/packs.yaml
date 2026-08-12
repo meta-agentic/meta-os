@@ -48,6 +48,25 @@ packs:
                       # copies were installed via the claude-flow ecosystem, so the
                       # pack may end up an attributed mirror pinned at upstream)
 
+  advanced-math:
+    repo: https://github.com/meta-agentic/meta-discipline-math
+    ref: main
+    description: "Advanced-mathematics discipline (12 skills): a rigor spine (mathematical-rigor, dimensional-analysis, hypercomplex-and-geometric-algebra) plus per-branch disciplines — calculus-and-analysis, linear-algebra, probability-and-statistics, number-theory, discrete-mathematics, differential-equations, abstract-algebra, complex-analysis, geometry-and-trigonometry — each emitting a checkable ledger. First-party; the quantitative-rigor wedge from pack-strategy."
+    provenance: first-party
+    license: MIT
+    provides: [dimensional-analysis, mathematical-rigor]
+    status: available
+
+  physics:
+    repo: https://github.com/meta-agentic/meta-discipline-physics
+    ref: main
+    description: "Physics discipline (16 skills): a method spine (symmetry & conservation, limiting cases, order-of-magnitude, model-building, experimental error), branch disciplines (classical mechanics, electromagnetism, waves, quantum, statistical mechanics & thermodynamics, relativity), and a high-energy tier (QFT, particle physics & the Standard Model, relativistic kinematics, accelerator physics, cosmology) — each emitting a checkable ledger. First-party."
+    provenance: first-party
+    license: MIT
+    depends: [advanced-math]   # consumes dimensional-analysis rather than duplicating it;
+                               # under the `pure` profile also mathematical-rigor
+    status: available
+
   software-engineering:
     repo: https://github.com/meta-agentic/meta-discipline-swe
     ref: main

@@ -54,10 +54,10 @@ packs:
     description: "Software-engineering discipline as judgment, not process. Ships constrained-generation (make LLM generation reliable by restricting what may be emitted — DSL/schema/typed API — behind a four-condition gate whose default answer is no, plus a validator-closed repair loop); design principles applied in review context (SOLID/GRASP, composition), ADR discipline and design reviews follow. First-party."
     provenance: first-party
     license: MIT
-    status: planned   # first skill authored; flips to available when the pack repo's
-                      # main carries it. Note: every skill in this pack is opt-in —
-                      # mounting enables nothing, each switch defaults to `off` in the
-                      # pack's pack.yaml until the instance sets it in .packs.yaml.
+    status: available # main carries constrained-generation; more skills follow.
+                      # Note: every skill in this pack is opt-in — mounting enables
+                      # nothing, each switch defaults to `off` in the pack's pack.yaml
+                      # until the instance sets it in .packs.yaml.
 
 # Candidates awaiting verification before entering the curated list (community
 # suggestions; upstream owner/repo, license, and mountable-skill layout must be

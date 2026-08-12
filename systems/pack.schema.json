@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/meta-agentic/meta-os/systems/pack.schema.json",
+  "title": "meta-os pack manifest (pack.yaml)",
+  "description": "The machine-readable contract for a pack's pack.yaml. Prose lives in systems/packs.md; the authoring procedure in skills/pack-builder. A pack that validates against this schema and ships the required files (see required_files) is conformant.",
+  "type": "object",
+  "required": ["version", "name", "description", "provenance", "license"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": 1,
+      "description": "Manifest schema version. Bump only when this schema changes incompatibly."
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "Pack name — the key used in the registry, in .packs.yaml, and by packs.sh. Names the DISCIPLINE, not a tool."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 40,
+      "description": "One dense sentence: the discipline, the skill count, the spine/branch structure, and that skills emit a checkable ledger."
+    },
+    "provenance": {
+      "enum": ["first-party", "third-party", "vendored"],
+      "description": "Never a silent fork. third-party/vendored must name the real upstream in PROVENANCE.md."
+    },
+    "license": {
+      "type": "string",
+      "description": "SPDX identifier, or 'verify-at-add' when the upstream license must be checked when mounting."
+    },
+    "depends": {
+      "type": "array",
+      "description": "Packs this pack's skills assume are mounted. Names only — resolution is by registry name. Deliberately NOT a version range: a mounted pack is a pinned submodule, so the instance's pin IS the version. See systems/packs.md, 'Dependencies between packs'.",
+      "items": {
+        "oneOf": [
+          {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
+          },
+          {
+            "type": "object",
+            "required": ["name"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+              "for": {
+                "type": "array",
+                "description": "The skill names this pack actually consumes from the dependency. Mounting MUST fail loudly if one of these is skipped by the collision rule.",
+                "items": { "type": "string" }
+              },
+              "reason": { "type": "string", "description": "Why the dependency exists — what would otherwise be duplicated." },
+              "optional": {
+                "type": "boolean",
+                "default": false,
+                "description": "true = the pack degrades gracefully without it (e.g. only under a non-default profile). Optional deps are reported, never auto-mounted."
+              }
+            }
+          }
+        ]
+      }
+    },
+    "provides": {
+      "type": "array",
+      "description": "Skill names this pack considers its public surface — the names other packs may depend on. A collision on a provided name is an error, not a warning.",
+      "items": { "type": "string" }
+    },
+    "config": {
+      "type": "object",
+      "description": "The pack's knobs. Skills read config-first; the instance sets values in .packs.yaml under packs.<name>.config.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "default": {
+            "description": "Value used when the instance sets nothing. Quote 'off'/'on'/'no'/'yes' so YAML does not coerce them to booleans."
+          },
+          "one_of": {
+            "type": "string",
+            "description": "Pipe-separated enum, e.g. 'pure | applied'. A string, not a list — packs.sh parses it without a YAML library."
+          },
+          "doc": {
+            "type": "string",
+            "description": "What the key means and what each value does. Required: an undocumented knob is an opinion in hiding."
+          }
+        },
+        "required": ["doc"]
+      }
+    },
+    "profiles": {
+      "type": "object",
+      "description": "Named methodology/rigor bundles, mapping profile name to its file. Omit entirely when the discipline has no genuine variants — do not invent a split to look like the other packs.",
+      "additionalProperties": { "type": "string" }
+    },
+    "default_profile": {
+      "type": "string",
+      "description": "Legacy key (the agile pack). Prefer declaring the default via config.profile.default."
+    }
+  },
+  "required_files": {
+    "$comment": "Not JSON Schema validation — the conformance checklist a reviewer or script applies to the repo alongside this manifest. Mirrored in prose in systems/packs.md.",
+    "always": [
+      "pack.yaml",
+      "README.md",
+      "PROVENANCE.md",
+      "LICENSE",
+      ".gitignore",
+      "config.example.yaml",
+      "skills/_index.md",
+      "skills/<skill>/SKILL.md"
+    ],
+    "conditional": {
+      "profiles/<name>.md": "one per entry in profiles:"
+    },
+    "per_skill": {
+      "frontmatter": "name (lowercase-kebab, matches folder) + description (what AND when, trigger words front-loaded)",
+      "sections": [
+        "intro — what a practitioner does, and how this skill relates to its siblings",
+        "## Method — numbered steps, referencing config keys inline",
+        "## The rigor standard — what 'done right' means; what to reject",
+        "## Checkable output — a NAMED ledger with a concrete example block",
+        "## Anti-patterns — the failure modes"
+      ]
+    }
+  }
+}

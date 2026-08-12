@@ -1,0 +1,6 @@
+# Copy this block into your instance's .packs.yaml under packs: <pack>: config:
+packs:
+  <pack>:
+    config:
+      profile: <default>      # <a> | <b>
+      <knob>: <value>         # <what it does>

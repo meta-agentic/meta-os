@@ -45,6 +45,11 @@ as-is.
   pack bump.
 - **Collision rule: the framework wins.** A pack skill whose name collides with a core
   skill (or an earlier pack's) is skipped with a warning — deterministic, no shadowing.
+  **Exception — a depended-upon skill never fails quietly.** If the skipped name is one
+  that another mounted pack declares in `depends[].for`, the warning becomes an **error**:
+  the mount stops and names both claimants. A silently skipped dependency leaves the
+  dependent pack citing a skill that isn't there, which surfaces later as an agent
+  confidently improvising the discipline it was supposed to defer to.
 - Mounting also enriches the **project-local `.claude/` engine surface** —
   `.claude/skills/` mirrors the union (sessions inside the instance discover
   everything with zero global setup; portable to containers/remote), pack `agents/`
@@ -121,6 +126,62 @@ Packs MAY ship **profiles** — named convention bundles (e.g. a Scrum-with-trac
 profile vs. a lightweight Kanban profile) selected via `config: profile: <name>` — so
 "choose a methodology" is a one-line decision, and "change it" is an edit to instance
 data, never a fork of the pack.
+
+## Conformance — the manifest contract
+
+[[systems/pack.schema.json|pack.schema.json]] is the machine-readable contract for a
+pack's `pack.yaml`: required keys, the `config` key shape (`default` / `one_of` /
+`doc`), `depends` / `provides`, and — in its `required_files` block — the files a
+conformant pack ships. [[skills/pack-builder/SKILL|pack-builder]] carries the matching
+skeleton at `resources/discipline-pack/`.
+
+The convention is deliberately checkable rather than prose-only, because prose drifts:
+the structure documented before this contract existed had already fallen behind what the
+shipped packs carried, and a pack authored from the doc came out wrong. **Validate the
+manifest, then mount it** — reading another pack by eye is how the drift propagates.
+
+Two rules the schema encodes that are easy to get wrong from examples alone:
+
+- **Every skill emits a named ledger** with a filled-in example, and the ledger must be
+  able to say *no* — a rigor standard with no failing reading is decoration.
+- **Profiles are optional.** Ship them only for genuine methodology variants; a pack with
+  one mode says so instead of inventing a split to look like its siblings.
+
+## Dependencies between packs
+
+Packs reuse each other: the physics pack consumes the math pack's `dimensional-analysis`
+rather than redefining units, π-groups, and uncertainty. That relationship is declared in
+the depending pack's `pack.yaml` and mirrored in its registry entry (so it can be resolved
+*before* the repo is cloned):
+
+```yaml
+depends:
+  - name: advanced-math
+    for: [dimensional-analysis]
+    reason: "units homogeneity, Buckingham π, uncertainty propagation — not duplicated here"
+```
+
+The dependency's own manifest declares the other side of the contract:
+
+```yaml
+provides: [dimensional-analysis, mathematical-rigor]   # the public surface
+```
+
+**Resolution semantics** — deliberately thinner than Maven/Gradle:
+
+| Concern | Rule | Why |
+|---------|------|-----|
+| Version | **Names only; no ranges.** | A mounted pack is a *pinned submodule* — the instance's commit pin is the version. A range would fight the pin, and mediating two ranges against one submodule has no sound answer. |
+| Transitivity | Resolved transitively by name against the registry; `add <pack>` mounts missing dependencies and reports each one it added. | Mounting must not require the adopter to hand-walk a graph. |
+| Missing | **Hard failure**, naming what is missing and which registry entry would supply it. | A pack whose dependency is absent is not degraded, it is broken. |
+| Cycles | Rejected at validate time. | Two packs that need each other are one pack. |
+| Removal | `remove <pack>` refuses while a mounted pack depends on it; removing the dependents first (or an explicit cascade) is the path. | Silent orphaning is how a working instance breaks a week later. |
+| Optional | `optional: true` deps are **reported, never auto-mounted** — for a skill only reachable under a non-default profile. | Auto-mounting on a profile the estate doesn't use is unrequested surface. |
+| Collision | A collision on a depended-upon name is an **error** (see the mount model above). | The one case where the warn-and-skip default hides a real break. |
+
+Pins stay the unit of upgrade: bumping a dependency is `packs.sh update <dep>` in the
+instance, a reviewable commit, exactly as for any other pack. Nothing here introduces a
+resolver that can change what is mounted without a diff.
 
 ## Not packs, still worth knowing
 

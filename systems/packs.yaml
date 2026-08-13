@@ -48,13 +48,35 @@ packs:
                       # copies were installed via the claude-flow ecosystem, so the
                       # pack may end up an attributed mirror pinned at upstream)
 
+  advanced-math:
+    repo: https://github.com/meta-agentic/meta-discipline-math
+    ref: main
+    description: "Advanced-mathematics discipline (12 skills): a rigor spine (mathematical-rigor, dimensional-analysis, hypercomplex-and-geometric-algebra) plus per-branch disciplines — calculus-and-analysis, linear-algebra, probability-and-statistics, number-theory, discrete-mathematics, differential-equations, abstract-algebra, complex-analysis, geometry-and-trigonometry — each emitting a checkable ledger. First-party; the quantitative-rigor wedge from pack-strategy."
+    provenance: first-party
+    license: MIT
+    provides: [dimensional-analysis, mathematical-rigor]
+    status: available
+
+  physics:
+    repo: https://github.com/meta-agentic/meta-discipline-physics
+    ref: main
+    description: "Physics discipline (16 skills): a method spine (symmetry & conservation, limiting cases, order-of-magnitude, model-building, experimental error), branch disciplines (classical mechanics, electromagnetism, waves, quantum, statistical mechanics & thermodynamics, relativity), and a high-energy tier (QFT, particle physics & the Standard Model, relativistic kinematics, accelerator physics, cosmology) — each emitting a checkable ledger. First-party."
+    provenance: first-party
+    license: MIT
+    depends: [advanced-math]   # consumes dimensional-analysis rather than duplicating it;
+                               # under the `pure` profile also mathematical-rigor
+    status: available
+
   software-engineering:
     repo: https://github.com/meta-agentic/meta-discipline-swe
     ref: main
-    description: "Software-engineering & OOD discipline: design principles applied in review context (SOLID/GRASP, composition), ADR discipline, design reviews. First-party."
+    description: "Software-engineering discipline as judgment, not process. Ships constrained-generation (make LLM generation reliable by restricting what may be emitted — DSL/schema/typed API — behind a four-condition gate whose default answer is no, plus a validator-closed repair loop); design principles applied in review context (SOLID/GRASP, composition), ADR discipline and design reviews follow. First-party."
     provenance: first-party
     license: MIT
-    status: planned   # lands with its authoring story
+    status: available # main carries constrained-generation; more skills follow.
+                      # Note: every skill in this pack is opt-in — mounting enables
+                      # nothing, each switch defaults to `off` in the pack's pack.yaml
+                      # until the instance sets it in .packs.yaml.
 
 # Candidates awaiting verification before entering the curated list (community
 # suggestions; upstream owner/repo, license, and mountable-skill layout must be

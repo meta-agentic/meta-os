@@ -88,8 +88,8 @@ packs:
 #     surfaced via the Snyk "top Claude skills" roundup — verify license/layout).
 # Capability themes from that roundup (TDD, systematic debugging, frontend design
 # control, context management, dependency management) are skill *concepts*, not repos:
-# tdd + diagnosing-bugs come from the mattpocock pack, others inform the SWE pack's
-# scope rather than being registry entries.
+# tdd + diagnosing-bugs come from the mattpocock pack, others inform the software-
+# engineering pack's scope rather than being registry entries.
 # Directories/utilities that are NOT packs (see "Not packs" in systems/packs.md):
 #   awesome-claude-skills, awesome-agent-skills, anthropics/claude-cookbooks,
 #   modelcontextprotocol/servers, ccusage.

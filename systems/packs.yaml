@@ -8,9 +8,10 @@ packs:
   agile:
     repo: https://github.com/meta-agentic/meta-discipline-agile
     ref: main
-    description: "Scrum harness for an agentic estate: agile-process (backlog/Jira mirror, ceremonies) and agile-swarm (multi-lane sprint execution). First-party, extracted from the framework core."
+    description: "Agile delivery discipline (3 skills): agile-process (backlog of record, ceremonies, transitions — transition ledger), agile-swarm (multi-lane sprint execution — lane ledger) and story-estimation (two-axis extension/intension sizing — estimate ledger). First-party, extracted from the framework core."
     provenance: first-party
     license: MIT
+    provides: [agile-process, agile-swarm, story-estimation]
     status: available
 
   superpowers:

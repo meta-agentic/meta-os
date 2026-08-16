@@ -171,7 +171,12 @@ the structure documented before this contract existed had already fallen behind 
 shipped packs carried, and a pack authored from the doc came out wrong. **Validate the
 manifest, then mount it** — reading another pack by eye is how the drift propagates.
 
-Two rules the schema encodes that are easy to get wrong from examples alone:
+**Config keys are written in block form**, one key per block with `default:` / `one_of:` /
+`doc:` beneath it — *not* as an inline `{ … }` map. `doc:` is required and its prose
+contains commas, which a comma-split inline map cannot carry, so the inline shape cannot
+express a conformant key at all. It survives only as a legacy shape the mount still reads.
+
+Three rules the schema encodes that are easy to get wrong from examples alone:
 
 - **Every skill emits a named ledger** with a filled-in example, and the ledger must be
   able to say *no* — a rigor standard with no failing reading is decoration.

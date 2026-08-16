@@ -143,6 +143,23 @@ prove it works before publishing:
   against the discipline's standard (Step 0.3). If it isn't, the rigor standard is
   missing — go back to Step 1.
 
+## Step 7 — Evolve it (a discipline is never finished)
+
+Publishing is not the end state: a discipline earns its rigor standard by surviving
+contact with real work. The loop — observe in the instance → classify (method ·
+parameter · profile · scope · dependency) → change upstream → re-verify → adopt by pin
+bump — is [[systems/packs]], "Evolving a discipline". Three authoring rules it implies:
+
+- **The ledger is the feedback channel.** A standard that runs keep waiving, or a ledger
+  field nobody ever fills, is evidence about the *discipline*, not the run — tighten it,
+  cut it, or move it behind a profile.
+- **Improvements land in the pack, never in an instance's `.packs/<pack>/`** — that is a
+  detached submodule checkout. If the change only makes sense for one estate, it was
+  config (Step 3), not method.
+- **Adding a skill re-runs Step 0.** A pack grows by passing the three-part test again,
+  not by accretion; retiring one keeps a deprecation row for a minor version, because
+  another pack may name it in `depends[].for`.
+
 ## Principles
 
 - **Discipline, not dump.** A pack makes an agent behave like a competent practitioner —

@@ -20,6 +20,37 @@ disciplines beyond software), see [[systems/pack-strategy]]. To *author* one, us
 [[skills/pack-builder/SKILL|pack-builder]] skill. Same philosophy as the
 [[systems/distribution|framework mount]] itself; packs just apply it per-domain.
 
+## Vocabulary — pack, discipline, registry name
+
+One thing, three names, deliberately: **pack** is the *mechanism* (a mountable, pinned
+repo of skills), **discipline** is what a good one *contains* (a method + a rigor
+standard + portability — [[systems/pack-strategy]]), and the **registry name** is the
+short key an instance mounts it by. First-party discipline repos are therefore named
+`meta-discipline-<name>` while the registry key names the discipline, not the repo
+(`agile` → `meta-discipline-agile`, `advanced-math` → `meta-discipline-math`); the
+authoring skeleton follows the same rule (`pack-builder/resources/discipline-pack/`).
+Where these docs say *pack*, read *a discipline packaged for mounting*.
+
+## What a discipline adds to a skill
+
+A skill is one codified workflow — a method, executable, discoverable. A discipline is a
+*set* of them plus the two things that make an agent a practitioner rather than a
+step-follower, and both are **per-skill**, not pack-level prose:
+
+| | A plain skill | A skill inside a discipline |
+|---|---|---|
+| **Method** | numbered steps | the same steps, with `config.<knob>` referenced inline where a choice changes the procedure |
+| **Standard of rigor** | usually absent | **required** — what "done right" means, stated as rules that *reject* something |
+| **Evidence** | free-form output | **a named ledger** with a concrete filled-in example, able to read *fail* |
+| **Boundaries** | implicit | the sibling skill it defers to, named in the intro |
+| **Portability** | the author's conventions, welded in | method in the pack, choices in the instance (config · profiles · overrides) |
+
+[[systems/pack.schema.json|pack.schema.json]]'s `per_skill` block is the checkable form
+of that right-hand column, and `resources/discipline-pack/skills/SKILL.template.md` in
+[[skills/pack-builder/SKILL|pack-builder]] is the shape to copy. The rigor standard and
+the ledger are what [[systems/pack-strategy]]'s *checkable* test cashes out to: without
+them a pack is a prompt pile with a manifest.
+
 ## What a pack is
 
 A git repo carrying `SKILL.md` folders. The mount resolves a pack's skills two ways:
@@ -182,6 +213,45 @@ provides: [dimensional-analysis, mathematical-rigor]   # the public surface
 Pins stay the unit of upgrade: bumping a dependency is `packs.sh update <dep>` in the
 instance, a reviewable commit, exactly as for any other pack. Nothing here introduces a
 resolver that can change what is mounted without a diff.
+
+## Evolving a discipline — the improvement loop
+
+The lifecycle table above is the *consumption* side (how an instance takes a new pin);
+this is how the discipline itself gets better. Skills improve **structurally, not by
+memory** ([[skills/_index]]) — a discipline adds one thing to that loop: **the ledger is
+the evidence stream.** A rigor standard runs keep waiving, or a ledger column that is
+always empty, is a finding about the discipline, not about the run.
+
+1. **Observe in the instance.** Per-run [[templates/skill-note|skill-notes]] roll into the
+   one standing [[templates/skill-learnings|skill-learnings]] note per skill
+   (`memory/wiki/skills/<skill>-learnings.md`). Learnings never live in a pack repo —
+   they are instance experience, and packs are public-safe by construction.
+2. **Classify before editing** — which layer is actually wrong decides where the change
+   goes, and getting this wrong is how a pack turns back into one shop's dogma:
+
+   | Symptom | Layer | Where the fix lands |
+   |---------|-------|---------------------|
+   | Every estate practising this discipline would want it | **method** | edit the skill in the pack |
+   | Only this estate wants it | **parameter** | a `config:` knob (or a knob that already exists) |
+   | A coherent *other* way to practise the discipline | **profile** | a new `profiles/<name>.md` — never a fork |
+   | A distinct method the pack doesn't cover | **scope** | a new skill; re-run the three-part test first |
+   | Another pack already codifies it | **dependency** | `depends:` + cite by wikilink, never a second copy |
+3. **Change it upstream.** Fold the generalized learning into the pack repo as a reviewed
+   change, then delete it from the instance note. Editing `.packs/<name>/` in place is a
+   detached submodule change — the next update discards it.
+4. **Re-verify before publishing.** `pack.yaml` still validates against
+   [[systems/pack.schema.json|pack.schema.json]]; the changed skill still emits its named
+   ledger and can still say *no*; `skills/_index.md` gained its row; the skill was driven
+   once end-to-end in a clean instance clone ([[skills/pack-builder/SKILL|pack-builder]]
+   Step 6).
+5. **Adopt deliberately.** Instances take the improvement with `scripts/packs.sh update
+   <pack>` — a pin bump, a reviewable commit. Nothing improves ambiently: the estate
+   chooses when the discipline changes under it.
+
+Retiring or renaming a skill runs the same loop in reverse, and keeps a deprecation row
+for one minor version naming what supersedes it (as the framework does under Migration
+below) — another pack may name that skill in `depends[].for`, where a silent
+disappearance becomes an agent improvising the discipline it was meant to defer to.
 
 ## Not packs, still worth knowing
 

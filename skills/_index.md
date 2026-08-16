@@ -47,6 +47,13 @@ feed it; when a learning generalizes beyond the instance, fold it into the skill
 note. Learnings never live in this folder — they are instance experience, and this repo
 stays public-safe.
 
+**For a skill that came from a mounted pack, the fold-back goes to the pack repo, not
+here:** change it upstream, then adopt it with `scripts/packs.sh update <pack>` (a pin
+bump, a reviewable commit). Editing `.packs/<name>/` in place is a detached submodule
+change the next update discards. The full loop — including how to tell a *method* change
+from one that is really a config knob, a profile, or a new skill — is in
+[[systems/packs]], "Evolving a discipline".
+
 ## Adding a skill
 
 1. Build/scaffold it with [[skills/skill-builder/SKILL|skill-builder]].

@@ -1,0 +1,153 @@
+# meta-os gates, run by CI instead of by trust.
+#
+# Every gate in this estate has been opt-in per clone (`git config core.hooksPath
+# .githooks`), which vault/CLAUDE.md already calls out as a hole: `--no-verify`, or
+# simply a clone where nobody ran that command, bypasses everything silently. This
+# workflow closes it — the gates run on the server, where they cannot be skipped.
+#
+# Two jobs on purpose:
+#   gates   — the baseline ratchet. Blocks. Fails only on debt a change INTRODUCED.
+#   debt    — the same gates under `--strict`. Never blocks; publishes the true,
+#             un-baselined debt to the run summary so paying it down stays a visible
+#             decision rather than a forgotten one.
+#
+# Deliberately unqualified `push:` and `pull_request:` triggers, per the brief. That
+# means a PR branch in this repo runs twice (once for the branch ref, once for the
+# merge ref) — they land in different concurrency groups, so neither cancels the
+# other. Narrowing `push:` to `branches: [main]` is the usual fix; left as a call for
+# whoever owns the branch protection rules.
+name: check
+
+# Quoted: bare `on` is a YAML 1.1 boolean, so an unquoted key parses as True in
+# PyYAML and any other 1.1 loader. Actions reads either; quoting keeps the file
+# honest under `yaml.safe_load`, which is how it gets validated locally.
+"on":
+  push:
+  pull_request:
+
+# Read-only. These jobs check out code and run two Python scripts; they publish
+# nothing, comment nowhere, and need no token beyond fetching the tree.
+permissions:
+  contents: read
+
+# Superseded runs cancel: pushing twice to a branch leaves only the newer run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned to the interpreter the gates were actually exercised against, rather
+  # than `latest` — a gate that changes behaviour when the runner image moves is
+  # not a gate. Bumping this is a one-line, reviewable change.
+  PYTHON_VERSION: "3.10"
+  # jsonschema 3.2.0 has no draft 2020-12 meta-schema; scripts/validate_pack.py
+  # knows that, pins Draft7Validator explicitly and guards the fallback. Pinning
+  # here keeps CI and a developer's machine on the same validator.
+  PIP_PACKAGES: "pyyaml==6.0.2 jsonschema==3.2.0"
+
+jobs:
+  gates:
+    name: Gates (baseline ratchet)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the tree
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install validator dependencies
+        run: python -m pip install --disable-pip-version-check --quiet ${{ env.PIP_PACKAGES }}
+
+      - name: Framework self-check
+        run: python scripts/validate_framework.py
+
+      # scripts/validate_pack.py lands with the `feat/pack-conformance-validator`
+      # branch, which is not merged yet. Two wrong answers here: hard-failing on a
+      # branch that legitimately does not carry it, and `|| true`-ing it into
+      # silence. So absence is REPORTED — a warning annotation on the run plus a
+      # line in the job summary — and presence is enforced with the script's own
+      # exit code. The day the branch merges, this step starts gating with no edit.
+      - name: Pack conformance gate
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ -f scripts/validate_pack.py ]; then
+            python scripts/validate_pack.py
+            echo "### Pack conformance gate: enforced" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning title=Pack conformance gate did not run::scripts/validate_pack.py is not present on this ref. Pack conformance was NOT checked in this run."
+            {
+              echo "### Pack conformance gate: NOT RUN"
+              echo
+              echo "\`scripts/validate_pack.py\` is absent on \`${REF_NAME}\`, so the pack"
+              echo "conformance contract was **not** checked in this run. It arrives with the"
+              echo "\`feat/pack-conformance-validator\` branch; this step enforces it automatically"
+              echo "once that branch is merged."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  debt:
+    name: True debt (--strict, advisory)
+    runs-on: ubuntu-latest
+    # Advisory by design. The point of the ratchet is to stop debt growing, not to
+    # fail every PR on day one — so this job reports and never gates.
+    continue-on-error: true
+    steps:
+      - name: Check out the tree
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install validator dependencies
+        run: python -m pip install --disable-pip-version-check --quiet ${{ env.PIP_PACKAGES }}
+
+      - name: Framework self-check (--strict)
+        id: framework
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          python scripts/validate_framework.py --strict 2>&1 | tee framework-strict.txt
+
+      - name: Pack conformance (--strict)
+        id: pack
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          if [ -f scripts/validate_pack.py ]; then
+            python scripts/validate_pack.py --strict 2>&1 | tee pack-strict.txt
+          else
+            echo "scripts/validate_pack.py is not present on this ref — not checked." \
+              | tee pack-strict.txt
+          fi
+
+      - name: Publish the debt to the run summary
+        if: always()
+        env:
+          FRAMEWORK_OUTCOME: ${{ steps.framework.outcome }}
+          PACK_OUTCOME: ${{ steps.pack.outcome }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## True debt — advisory, never gates a merge"
+            echo
+            echo "\`--strict\` promotes every baselined warning to an error, so this is the"
+            echo "debt the ratchet is currently tolerating. Failing here is expected until"
+            echo "it is paid down; the blocking job is **Gates (baseline ratchet)**."
+            echo
+            echo "### Framework self-check (outcome: ${FRAMEWORK_OUTCOME})"
+            echo '```'
+            cat framework-strict.txt 2>/dev/null || echo "(step did not produce output)"
+            echo '```'
+            echo
+            echo "### Pack conformance (outcome: ${PACK_OUTCOME})"
+            echo '```'
+            cat pack-strict.txt 2>/dev/null || echo "(step did not produce output)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

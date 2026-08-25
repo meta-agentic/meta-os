@@ -79,6 +79,15 @@ packs:
                       # nothing, each switch defaults to `off` in the pack's pack.yaml
                       # until the instance sets it in .packs.yaml.
 
+  agents:
+    repo: https://github.com/meta-agentic/meta-discipline-agents
+    ref: main
+    description: "Agent engineering discipline (7 skills): agent-architecture (the refusal test, the escalation ladder, pattern selection — agent decision record), agent-prompting (prompt as versioned code — prompt version record), agent-skills (declarative procedures, Clarify-Execute-Verify — skill review record), agent-harness (model proposes, code disposes — harness contract), agent-safety (guardrails, threat model, least privilege — threat & permission ledger), agent-evaluation (trajectory grading, CI gates — eval report) and loop-engineering (machine-checkable termination, unattended operation, the self-improving harness — loop charter). Parameterized on an autonomy profile. First-party."
+    provenance: first-party
+    license: MIT
+    provides: [agent-architecture, agent-prompting, agent-skills, agent-harness, agent-safety, agent-evaluation, loop-engineering]
+    status: available
+
 # Candidates awaiting verification before entering the curated list (community
 # suggestions; upstream owner/repo, license, and mountable-skill layout must be
 # confirmed first — the curation bar in systems/packs.md applies):

@@ -24,6 +24,7 @@ whole library — never create a second real copy; discovery is via symlinks.
 | `hooks-automation` | Automation | **→ removed, third-party.** It documented claude-flow's own hook CLI; install that upstream (`npx @claude-flow/cli@latest init`) if you want it. The framework's hook *policy* — staged per pack, never auto-wired — is in [[systems/packs]] |
 | `swarm-orchestration` | Orchestration | **→ removed, third-party.** Coordination inside a session belongs to the host engine ([[systems/engine]]); the OS's own parallel model is [[systems/swarm-harness]], driven by the [agile pack](https://github.com/meta-agentic/meta-discipline-agile)'s `agile-swarm` |
 | [[skills/multi-engine/SKILL\|multi-engine]] | Meta | Cross-provider headless fan-out via meta-cli (`claude`/`gemini`/`grok`/…); collect → `memory/raw/` — see [[systems/engine]] |
+| [[skills/infoviz/SKILL\|infoviz]] | Data | Choose the RIGHT visual form before drawing it — chart/encoding selection from data + task, and method choice for complex data (network, hierarchy, flow, temporal, geospatial); hands off to styling |
 
 ## What is deliberately not here
 

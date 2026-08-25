@@ -131,14 +131,18 @@ Rules ([[systems/packs]], "Dependencies between packs"):
 Check the manifest against the contract, then mount it into a **clean instance clone** and
 prove it works before publishing:
 
-- **Conformance** — `pack.yaml` validates against [[systems/pack.schema.json|pack.schema.json]],
-  and every file in that schema's `required_files` exists. Do this first: it is cheap, and
-  it catches the drift that reading another pack by eye does not.
-- `scripts/packs.sh add <pack> <url>` (then by registry name once listed) — skills land
-  in the union `skills/` and `.claude/skills/`; nested/plugin layouts resolve; collisions
-  shadow as expected; declared dependencies resolve and mount.
-- `scripts/packs.sh config <pack>` — defaults resolve, enums validate, a non-default
-  profile resolves.
+- **Conformance** — `python3 scripts/validate_pack.py <pack-dir>`, run from a **meta-os**
+  clone. It applies both halves of the contract: `pack.yaml` against
+  [[systems/pack.schema.json|pack.schema.json]], and that schema's `required_files`
+  checklist — every required file present, a `profiles/<name>.md` per declared profile,
+  and each skill carrying the front-matter and `##` sections the checklist names. Do this
+  first: it is cheap, and it catches the drift that reading another pack by eye does not.
+- `scripts/packs.sh add <pack> <url>` — the **instance template's** script, run from an
+  instance, not from meta-os (then by registry name once listed). Skills land in the union
+  `skills/` and `.claude/skills/`; nested/plugin layouts resolve; collisions shadow as
+  expected; declared dependencies resolve and mount.
+- `scripts/packs.sh config <pack>` (instance template) — defaults resolve, enums validate,
+  a non-default profile resolves.
 - Exercise one skill end-to-end against a real input; confirm its output is *checkable*
   against the discipline's standard (Step 0.3). If it isn't, the rigor standard is
   missing — go back to Step 1.

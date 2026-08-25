@@ -1,0 +1,14 @@
+# meta-os pack conformance — accepted debt (the ratchet).
+#
+# Each line is one KNOWN violation, recorded so it warns instead of failing
+# the gate. A violation NOT listed here is an error: debt can be paid down,
+# never grown. Removing a line is how debt gets retired — do that in the same
+# commit that fixes it. Regenerate with:
+#     python3 scripts/validate_pack.py --update-baseline
+# Format: <check>\t<path>\t<detail>
+# checklist-placeholder and pack-manifest are never recorded — see BASELINEABLE.
+pack-conditional-file	skills/pack-builder/resources/discipline-pack/profiles/<profile-a>.md	pack.yaml declares profile '<profile-a>' but its file is missing (required_files.conditional: one per entry in profiles:)
+pack-conditional-file	skills/pack-builder/resources/discipline-pack/profiles/<profile-b>.md	pack.yaml declares profile '<profile-b>' but its file is missing (required_files.conditional: one per entry in profiles:)
+pack-required-file	skills/pack-builder/resources/discipline-pack/LICENSE	required by pack.schema.json required_files.always, but missing
+pack-required-file	skills/pack-builder/resources/discipline-pack/skills	required_files.always names `skills/<skill>/SKILL.md` but the pack ships no skills/<name>/SKILL.md — a pack with no skill is not a pack
+pack-schema	skills/pack-builder/resources/discipline-pack/pack.yaml	name: '<pack>' does not match '^[a-z][a-z0-9-]*$'

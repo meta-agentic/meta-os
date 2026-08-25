@@ -23,6 +23,7 @@ whole library — never create a second real copy; discovery is via symlinks.
 | [[skills/hooks-automation/SKILL\|hooks-automation]] | Automation | Pre/post-task hooks, session mgmt, git + memory coordination — vendored (claude-flow), held back pending a native replacement, see [[PROVENANCE]] |
 | [[skills/swarm-orchestration/SKILL\|swarm-orchestration]] | Orchestration | Multi-agent parallel execution, dynamic topology — vendored (claude-flow), held back pending a native replacement, see [[PROVENANCE]] |
 | [[skills/multi-engine/SKILL\|multi-engine]] | Meta | Cross-provider headless fan-out via meta-cli (`claude`/`gemini`/`grok`/…); collect → `memory/raw/` — see [[systems/engine]] |
+| [[skills/infoviz/SKILL\|infoviz]] | Data | Choose the RIGHT visual form before drawing it — chart/encoding selection from data + task, and method choice for complex data (network, hierarchy, flow, temporal, geospatial); hands off to styling |
 
 ## Library — full catalog
 

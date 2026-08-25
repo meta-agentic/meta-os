@@ -1,0 +1,3 @@
+#!/bin/sh
+# meta-os framework self-check gate. Enable per clone: git config core.hooksPath .githooks
+exec python3 "$(git rev-parse --show-toplevel)/scripts/validate_framework.py"

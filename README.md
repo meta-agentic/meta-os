@@ -226,6 +226,8 @@ federated project docs for navigation.
 ## Conventions
 
 - Every folder has an `_index.md` table of contents — update it when you add a file.
+- Entry READMEs across an estate's repos form one distributed knowledge base —
+  structure and linking rules in [`systems/repo-docs.md`](systems/repo-docs.md).
 - Cross-link with `[[wikilinks]]`; front-matter (`type:`, `tags:`) on every note.
 - `memory/raw/` is disposable scratch; promote to `memory/wiki/` to make knowledge durable.
 - **No instance data in this repo** — it stays public-safe by construction.

@@ -1,0 +1,15 @@
+# Not our product to analyse. graphify already skips node_modules, dist, build,
+# target, out, venv, coverage and __snapshots__ by default, and merges each
+# directory's .gitignore — so frontend dependencies and generated trees are
+# already out. These are the cases those defaults do not cover.
+
+# Agent tooling state — session/swarm bookkeeping, not source we own.
+.claude/
+.claude-flow/
+.swarm/
+.agentic-qe/
+
+# Vendored duplicate: isohub/extraction/tessera is a copy of the tessera repo,
+# which is graphed from its own checkout. Including both mints two nodes for
+# every class and invents edges between them.
+extraction/

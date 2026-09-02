@@ -32,7 +32,7 @@ one ships:
 | Feed | Source | Renders as | Notes |
 |------|--------|-----------|-------|
 | Engine usage | engine session logs (local JSONL) | tokens/cost: model × project × day | Read-only and local-only; the log path is set in the dashboard's gitignored instance config. Session logs contain instance content — they never enter any repo. |
-| Event log | `automations/events.jsonl` (instance) | live activity feed | Appended by hooks ([[skills/hooks-automation/SKILL\|hooks-automation]]), one JSON object per line: `{ts, actor, action, target, note?}` — same discipline as `runs.jsonl`. |
+| Event log | `automations/events.jsonl` (instance) | live activity feed | Appended by whatever hooks the instance has enabled — staged per pack and never auto-wired ([[systems/packs]]) — one JSON object per line: `{ts, actor, action, target, note?}` — same discipline as `runs.jsonl`. |
 | Outputs | `memory/output/` + recent `memory/wiki/` promotions (front-matter + git history) | output inbox | No new store; the promotion discipline is unchanged — the inbox just makes deliverables visible. |
 
 ## Phasing

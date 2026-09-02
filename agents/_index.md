@@ -11,7 +11,7 @@ backbone — skills say **what**, agents do **it**.
 
 Named agents message each other directly rather than polling shared state. Spawn a whole
 team in one message, each knowing who to message next. See the canonical pattern in
-[[systems/agentic-operating-model]] and the [[skills/swarm-orchestration/SKILL|swarm-orchestration]] / [[skills/agile-swarm/SKILL|agile-swarm]] skills.
+[[systems/agentic-operating-model]], [[systems/swarm-harness]], and the agile pack's [[skills/agile-swarm/SKILL|agile-swarm]] skill.
 
 ```
 Lead ←→ architect ←→ coder ←→ tester ←→ reviewer

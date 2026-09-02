@@ -38,17 +38,6 @@ packs:
     license: MIT   # verified: LICENSE — MIT, Matt Pocock
     status: available
 
-  claude-flow:
-    repo: https://github.com/ruvnet/claude-flow
-    ref: main
-    description: "Ruflo / claude-flow — the swarm-orchestration ecosystem most of this framework's original skill library came from (see PROVENANCE.md: agentdb-*, v3-*, flow-nexus-*, github-*, sparc/swarm/reasoningbank sets)."
-    provenance: third-party
-    license: MIT
-    status: planned   # becomes the mount that REPLACES the vendored copies once the
-                      # de-vendor story lands; upstream skill layout to verify (the
-                      # copies were installed via the claude-flow ecosystem, so the
-                      # pack may end up an attributed mirror pinned at upstream)
-
   advanced-math:
     repo: https://github.com/meta-agentic/meta-discipline-math
     ref: main
@@ -102,4 +91,9 @@ packs:
 # engineering pack's scope rather than being registry entries.
 # Directories/utilities that are NOT packs (see "Not packs" in systems/packs.md):
 #   awesome-claude-skills, awesome-agent-skills, anthropics/claude-cookbooks,
-#   modelcontextprotocol/servers, ccusage.
+#   modelcontextprotocol/servers, ccusage,
+#   ruvnet/claude-flow — verified 2026-08-29 and de-listed: 359 SKILL.md files at 282
+#     unique names (swarm-orchestration appears 4x), and its .claude-plugin/plugin.json
+#     declares mcpServers with no skills[] paths — so pack_skill_dirs finds nothing and
+#     the mount resolves to ZERO skills. It is a CLI ecosystem with its own installer,
+#     not a mountable collection. Install upstream, opt-in, outside the framework.

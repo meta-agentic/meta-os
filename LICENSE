@@ -5,10 +5,13 @@ Copyright (c) 2026 Marco Vanadia
 Portions of this repository (see PROVENANCE.md) are derived from third-party
 MIT-licensed works and remain subject to their original copyright notices:
 
-  - claude-flow / Ruflo — Copyright (c) rUv (ruvnet), MIT License
-    https://github.com/ruvnet/claude-flow
   - graphify — Copyright (c) Graphify Labs (safishamsi), MIT License
     https://github.com/safishamsi/graphify
+
+Retained for the record: content derived from claude-flow / Ruflo — Copyright (c)
+rUv (ruvnet), MIT License, https://github.com/ruvnet/claude-flow — was carried in
+this repository until 2026-08-29 and is present in its history. No such content
+ships in the current tree (see PROVENANCE.md).
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

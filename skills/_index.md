@@ -17,25 +17,29 @@ whole library — never create a second real copy; discovery is via symlinks.
 | [[skills/agile-process/SKILL\|agile-process]] | Process | **→ moved to the [agile pack](https://github.com/meta-agentic/meta-discipline-agile)** — mount with `scripts/packs.sh add agile`; link resolves in instances with the pack mounted |
 | [[skills/agile-swarm/SKILL\|agile-swarm]] | Process | **→ moved to the [agile pack](https://github.com/meta-agentic/meta-discipline-agile)** — same mount; deprecation rows kept for one minor version |
 | [[skills/graphify/SKILL\|graphify]] | Memory | Turn any folder (code/docs/papers/media) into a navigable knowledge graph |
-| [[skills/skill-builder/SKILL\|skill-builder]] | Meta | Author new skills with correct frontmatter + progressive disclosure |
+| [[skills/infoviz/SKILL\|infoviz]] | Interface | Choose the visual *form* for data before drawing it — encoding, complex-data method, trust gate |
+| [[skills/skill-builder/SKILL\|skill-builder]] | Meta | Author one skill: the trigger contract, progressive disclosure, and the registration a skill is not finished without |
 | [[skills/pack-builder/SKILL\|pack-builder]] | Meta | Author a new pack: apply the is-it-a-pack test, structure (pack.yaml/profiles), parameterise, provenance/registry, verify by mounting — see [[systems/pack-strategy]] |
 | [[skills/bootstrap-instance/SKILL\|bootstrap-instance]] | Meta | One-time onboarding for a fresh instance repo: backlog/tracking model, first project, GitHub integration |
-| [[skills/hooks-automation/SKILL\|hooks-automation]] | Automation | Pre/post-task hooks, session mgmt, git + memory coordination — vendored (claude-flow), held back pending a native replacement, see [[PROVENANCE]] |
-| [[skills/swarm-orchestration/SKILL\|swarm-orchestration]] | Orchestration | Multi-agent parallel execution, dynamic topology — vendored (claude-flow), held back pending a native replacement, see [[PROVENANCE]] |
+| `hooks-automation` | Automation | **→ removed, third-party.** It documented claude-flow's own hook CLI; install that upstream (`npx @claude-flow/cli@latest init`) if you want it. The framework's hook *policy* — staged per pack, never auto-wired — is in [[systems/packs]] |
+| `swarm-orchestration` | Orchestration | **→ removed, third-party.** Coordination inside a session belongs to the host engine ([[systems/engine]]); the OS's own parallel model is [[systems/swarm-harness]], driven by the [agile pack](https://github.com/meta-agentic/meta-discipline-agile)'s `agile-swarm` |
 | [[skills/multi-engine/SKILL\|multi-engine]] | Meta | Cross-provider headless fan-out via meta-cli (`claude`/`gemini`/`grok`/…); collect → `memory/raw/` — see [[systems/engine]] |
 
-## Library — full catalog
+## What is deliberately not here
 
-| Family | Skills |
-|--------|--------|
-| **agentdb-*** | advanced · learning · memory-patterns · optimization · vector-search |
-| **github-*** | code-review · multi-repo · project-management · release-management · workflow-automation |
-| **v3-*** | cli-modernization · core-implementation · ddd-architecture · integration-deep · mcp-optimization · memory-unification · performance-optimization · security-overhaul · swarm-coordination |
-| **flow-nexus-*** | neural · platform · swarm |
-| **misc** | browser · reasoningbank-agentdb · ruflo-setup · sparc-methodology · swarm-advanced |
+The core ships only what is part of the OS itself — bootstrapping, skill and pack authoring,
+the graph, the engine surface. Two categories live elsewhere on purpose:
 
-Promote a library skill into the core table when it becomes part of the standing operating
-model; prune it when it proves dead weight.
+- **Domain and process skill sets are packs.** An agile method, a discipline, a third-party
+  collection: mounted per instance from [[systems/packs.yaml|the registry]], pinned and
+  updatable, never vendored here. See [[systems/packs]].
+- **Third-party tooling is installed by its own installer.** The 30-skill claude-flow / Ruflo
+  library this repo once vendored (`agentdb-*`, `v3-*`, `flow-nexus-*`, `github-*`, sparc,
+  swarm and reasoningbank sets) was removed in 2026-08, and `hooks-automation`,
+  `swarm-orchestration` and `ruflo-setup` followed. That upstream is a CLI ecosystem rather
+  than a mountable collection — the evidence is recorded under "Not packs" in
+  [[systems/packs]] — so the supported path is its own installer, opt-in, outside this repo.
+  Full history in [[PROVENANCE]].
 
 ## Skill learnings — the improvement loop
 
@@ -58,6 +62,7 @@ from one that is really a config knob, a profile, or a new skill — is in
 
 1. Build/scaffold it with [[skills/skill-builder/SKILL|skill-builder]].
 2. Put the authoritative version in `skills/<name>/SKILL.md`.
-3. Add it to the core table (or the library catalog) above.
+3. Add it to the core table above **and** a row in [[PROVENANCE]] with its origin and
+   licence, in the same commit — no skill enters this folder without a recorded origin.
 4. Discovery: skills must be reachable by Claude Code (user-level `~/.claude/skills`
    symlink or per-repo `.claude/skills` link — see [[systems/agentic-operating-model]]).

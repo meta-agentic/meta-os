@@ -268,6 +268,21 @@ mounts), **ccusage** (a CLI utility; the dashboard's usage widget covers the sam
 natively). The registry keeps a comment block of such non-pack resources and of
 candidates awaiting provenance verification.
 
+**claude-flow / Ruflo belongs on that list too, and the reason is worth recording** — it
+was carried as `status: planned` on the assumption that it would one day mount as the pack
+replacing this framework's vendored copies. Verified 2026-08-29, it will not:
+
+| Finding | Consequence |
+|---------|-------------|
+| 359 `SKILL.md` files at **282 unique names** — `swarm-orchestration` appears four times, `sparc-methodology` four | Recursive discovery would mount hundreds of skills and resolve dozens of self-collisions by mount order |
+| Its `.claude-plugin/plugin.json` declares `mcpServers` and carries **no `skills[]` paths** | The manifest branch is authoritative when the file exists, so `pack_skill_dirs` finds nothing: the mount resolves to **zero skills**, silently |
+| It ships its own installer (`npx @claude-flow/cli@latest init`) | The supported path already exists and is opt-in |
+
+A registry entry that mounts nothing is worse than no entry, because it fails as success.
+The general rule this makes explicit: **a manifest without `skills[]` is not a skill
+collection** — check what a candidate's manifest actually declares before listing it, since
+the presence of the file alone switches the mount onto the authoritative branch.
+
 ## Migration
 
 Skills extracted from the framework core reappear as packs (first: the agile set; then

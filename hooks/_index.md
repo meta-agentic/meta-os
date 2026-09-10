@@ -15,6 +15,7 @@ become a mechanism.
 | Hook | Event | What it does |
 |------|-------|--------------|
 | `pre-commit-fetch.sh` | `PreToolUse` · `Bash` | Before any commit, fetch every tracked repo's default branch and name the checkouts that are behind. Reports; never blocks. |
+| `error-handler.sh` | *(called by hooks)* | Observability sink — counters, gauges and an event log. Not a hook itself; hooks invoke it. |
 
 ## Staged, never auto-wired
 
@@ -132,3 +133,111 @@ commits in one turn pays the fetch once. A repo whose fetch *fails* is reported 
 
 `bash`, `git`, `jq`. Without `jq` the hook exits silently rather than guessing at the
 payload.
+
+---
+
+## `error-handler.sh` — the observability sink
+
+Hooks are the one part of the OS that runs with nobody watching. They fire inside someone
+else's tool call, their output is consumed by a machine, and **a hook that quietly stops
+working looks exactly like a hook with nothing to say.** This sink makes the difference
+visible.
+
+It is not a hook. Hooks call it.
+
+### Two rules, both absolute
+
+1. **Never write to stdout.** A `PreToolUse` hook's stdout is parsed as JSON by the
+   harness. One stray byte from the sink corrupts its caller's contract and turns an
+   observability tool into an outage. Diagnostics go to stderr; data goes to files.
+2. **Never fail the caller.** It exits `0` unconditionally. A telemetry sink that can break
+   the thing it measures is worse than no telemetry — it adds a failure mode to a path that
+   previously had none.
+
+Callers hold up their half too: the invocation is `|| true` and its stdout is redirected to
+`/dev/null` at every call site. The sink promises not to write there; the caller does not
+rely on the promise.
+
+### Usage
+
+```
+error-handler.sh --hook NAME --event KIND [--code N] [--line N] [--cmd STR] [--detail STR]
+                 [--counter NAME[=N]]... [--gauge NAME=VALUE]...
+```
+
+Series names are namespaced by the calling hook, so two hooks cannot silently share a
+series and average each other's behaviour away.
+
+### Wiring it into a hook
+
+```bash
+set -Euo pipefail            # -E so the trap is inherited by functions and subshells
+
+HOOK_NAME="my-hook"
+_OBS_SH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/error-handler.sh"
+obs() { [ -x "$_OBS_SH" ] || return 0
+        "$_OBS_SH" --hook "$HOOK_NAME" "$@" >/dev/null 2>&1 || true; return 0; }
+
+on_err() { obs --event error --code "$1" --line "$2" --cmd "$3" \
+               --counter errors --counter "error_line_${2}"; }
+trap 'on_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
+```
+
+### The error channel must be silent when nothing is wrong
+
+This is the design constraint that costs the most to honour, and the one worth stating.
+
+`ERR` fires on any unguarded non-zero. Shell semantics exempt guarded failures — `cmd ||
+fallback`, `[ … ] && …`, anything inside a conditional — so an `ERR` event means genuinely
+unexpected **only if every expected non-zero in the script is explicitly guarded.**
+
+The first version of this instrumentation was not, and a healthy run logged **25 errors**:
+`ref=$(git symbolic-ref …)` returns non-zero whenever a clone has no `origin/HEAD`, which is
+both common and fully handled. A channel that fires two dozen times on the happy path is
+alarm fatigue, and alarm fatigue is how the one real error goes unread. Guarding those paths
+took the count to zero.
+
+The same bug bit the sink itself: `pipefail` turned a benign "key not yet present" read into
+a failure, the `ERR` net swallowed it, and the result was an event log that worked while no
+counter was ever written. **`pipefail` is deliberately not set** in `error-handler.sh`, and
+the `ERR` trap there is a net, not control flow.
+
+If you add a hook and its error counter climbs on healthy runs, the hook is wrong, not the
+sink.
+
+### Storage
+
+`$METAOS_OBS_DIR`, defaulting to `$XDG_STATE_HOME/meta-os` (or `~/.local/state/meta-os`) —
+never inside a repo, so telemetry cannot be committed.
+
+| File | Shape |
+|---|---|
+| `events.ndjson` | one JSON object per event; rotated at `METAOS_OBS_MAX_BYTES` (1 MiB) |
+| `counters.tsv` | `name <TAB> value` — monotonic, incremented under a lock |
+| `gauges.tsv` | `name <TAB> value <TAB> epoch` — last write wins |
+
+Counters are read-modify-write, and hooks run in parallel — this one is invoked from inside
+a parallel fetch loop — so an unlocked increment loses counts exactly when the system is
+busiest. `flock` where available, a bounded `mkdir` spin otherwise (macOS ships no
+`flock`); if the lock cannot be taken the write is skipped rather than raced.
+
+Gauges hold numbers you can chart. Paths and free text belong on the event as `--detail`.
+
+### What `pre-commit-fetch` records
+
+| Counter | Gauge |
+|---|---|
+| `invocations`, `not_a_commit`, `commits_intercepted` | `repos_scanned` |
+| `runs_clean`, `runs_reported` | `repos_behind` |
+| `repos_behind_total`, `fetch_failures_total` | `repos_unreachable` |
+| `errors`, `error_line_<n>`, `no_root`, `skipped_disabled` | `duration_s` |
+
+`runs_clean` matters as much as `runs_reported`: **the all-clear is a measurement too.**
+Recording only the bad case would leave a hook that scans nothing indistinguishable from one
+that scans everything and finds it healthy — precisely the ambiguity these hooks exist to
+remove.
+
+### Env
+
+`METAOS_OBS_OFF=1` disables the sink; `METAOS_OBS_DEBUG=1` reports its own failures on
+stderr; `METAOS_OBS_DIR` and `METAOS_OBS_MAX_BYTES` relocate and resize the store.

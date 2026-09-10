@@ -35,9 +35,43 @@
 # Install: see hooks/_index.md. Staged, never auto-wired — enabling a hook is
 # an explicit user decision, always ([[systems/packs]]).
 #
-set -uo pipefail
+# -E so the ERR trap is inherited by functions and subshells: the fetch loop runs
+# in parallel subshells, and a trap that stops at the first `(` would miss the
+# failures most worth seeing.
+set -Euo pipefail
 
-[ "${METAOS_PREFETCH_OFF:-0}" = "1" ] && exit 0
+# --- observability -----------------------------------------------------------
+# The sink lives next to this script. If it is absent, unreadable or broken, the
+# hook carries on in silence — telemetry is never allowed to become a dependency
+# of the thing it measures.
+#
+# stdout is redirected to /dev/null at EVERY call site, belt and braces: this
+# hook's stdout is parsed as JSON by the harness, so one stray byte from the
+# sink would corrupt the contract. The sink promises not to write there; this
+# does not rely on the promise.
+HOOK_NAME="pre-commit-fetch"
+_OBS_SH="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/error-handler.sh"
+obs() {
+  [ -x "$_OBS_SH" ] || return 0
+  "$_OBS_SH" --hook "$HOOK_NAME" "$@" >/dev/null 2>&1 || true
+  return 0
+}
+
+# ERR fires on an unguarded non-zero. Guarded failures — `cmd || exit 0`,
+# `[ … ] && …`, anything in a conditional — are exempt by shell semantics, which
+# is what makes this signal worth recording: the script's intentional non-zero
+# paths are all guarded, so anything reaching here is genuinely unexpected.
+on_err() {
+  local code=$1 line=$2 cmd=$3
+  obs --event error --code "$code" --line "$line" --cmd "$cmd" \
+      --counter errors --counter "error_line_${line}"
+}
+trap 'on_err "$?" "$LINENO" "$BASH_COMMAND"' ERR
+
+_t_start=$(date +%s 2>/dev/null || echo 0)
+obs --event invoked --counter invocations
+
+[ "${METAOS_PREFETCH_OFF:-0}" = "1" ] && { obs --event skipped --detail disabled --counter skipped_disabled; exit 0; }
 
 payload=$(cat)
 command -v jq >/dev/null 2>&1 || exit 0
@@ -54,7 +88,9 @@ cmd=$(printf '%s' "$payload" | jq -r '.tool_input.command // ""' 2>/dev/null) ||
 # negative costs a commit made against a stale tree, which is the whole point.
 printf '%s' "$cmd" | grep -Eq \
   '(^|[;&|(){}]|&&|\|\|)[[:space:]]*((sudo|env|time|nice|xargs)[[:space:]]+)?git([[:space:]]+-[^[:space:]]+([[:space:]]+[^[:space:]]+)?)*[[:space:]]+commit([[:space:]]|$)' \
-  || exit 0
+  || { obs --event pass --counter not_a_commit; exit 0; }
+
+obs --event fired --counter commits_intercepted
 
 # Resolve the repos root by probing, not by assuming. $HOME is NOT reliable:
 # containers and CI images routinely run as a user whose $HOME is nowhere near
@@ -77,7 +113,10 @@ for cand in \
 do
   if has_repos "$cand"; then ROOT="$cand"; break; fi
 done
-[ -z "$ROOT" ] && exit 0
+[ -z "$ROOT" ] && {
+  obs --event error --detail "no repos root resolved" --counter errors --counter no_root
+  exit 0
+}
 
 TTL="${METAOS_PREFETCH_TTL:-90}"
 CACHE="${TMPDIR:-/tmp}/.claude-prefetch"
@@ -88,7 +127,10 @@ now=$(date +%s)
 # clone has it; otherwise probe the conventional names rather than guessing one.
 default_branch() {
   local repo=$1 ref
-  ref=$(git -C "$repo" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null)
+  # Expected to fail whenever the clone has no origin/HEAD, which is common —
+  # guarded so it is not reported as an error. An error channel that fires on
+  # the healthy path is alarm fatigue, and alarm fatigue hides the real one.
+  ref=$(git -C "$repo" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)
   if [ -n "$ref" ]; then printf '%s' "${ref#origin/}"; return; fi
   for c in main master trunk; do
     git -C "$repo" show-ref --verify --quiet "refs/remotes/origin/$c" && { printf '%s' "$c"; return; }
@@ -133,10 +175,21 @@ for gitdir in "$ROOT"/*/.git; do
   pids+=($!)
 done
 for p in "${pids[@]:-}"; do [ -n "$p" ] && wait "$p" 2>/dev/null; done
-results=$(cat "$tmp"/* 2>/dev/null)
+results=$(cat "$tmp"/* 2>/dev/null || true)
 rm -rf "$tmp" 2>/dev/null || true
 
-[ -z "$results" ] && exit 0
+scanned=${#pids[@]}
+
+# The all-clear is a measurement too. Recording only the bad case would make a
+# hook that scans nothing indistinguishable from one that scans everything and
+# finds it healthy — the exact ambiguity this hook exists to remove.
+if [ -z "$results" ]; then
+  obs --event clean --counter runs_clean \
+      --gauge "repos_scanned=$scanned" --gauge "repos_behind=0" --gauge "repos_unreachable=0" \
+      --gauge "duration_s=$(( $(date +%s 2>/dev/null || echo 0) - _t_start ))" \
+      --detail "root=$ROOT"
+  exit 0
+fi
 
 lines=""
 failed=""
@@ -153,6 +206,17 @@ msg=""
 [ -n "$lines" ] && msg="Stale checkouts (fetched just now):"$'\n'"$lines"
 [ -n "$failed" ] && msg="${msg}${msg:+
 }Could not fetch: ${failed} (offline or no access — treat those as unknown, not current)."
+
+n_behind=$(printf '%s' "$lines" | grep -c . 2>/dev/null || echo 0)
+n_failed=0
+[ -n "$failed" ] && n_failed=$(printf '%s' "$failed" | awk -F', ' '{print NF}')
+_dur=$(( $(date +%s 2>/dev/null || echo 0) - _t_start ))
+
+obs --event report --counter runs_reported \
+    --counter "repos_behind_total=${n_behind:-0}" --counter "fetch_failures_total=${n_failed:-0}" \
+    --gauge "repos_scanned=$scanned" --gauge "repos_behind=${n_behind:-0}" \
+    --gauge "repos_unreachable=${n_failed:-0}" --gauge "duration_s=$_dur" \
+    --detail "root=$ROOT"
 
 [ -z "$msg" ] && exit 0
 

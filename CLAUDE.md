@@ -28,15 +28,18 @@ meta-os/  (this repo — PUBLIC-SAFE)      <instance>/  (private — the vault y
 ├── skills/      ← the skill library     ├── CLAUDE.md, _index.md  ← instance contract
 ├── systems/     ← how the OS operates   ├── projects/   ← estate registry
 ├── agents/      ← roster + patterns     ├── memory/     ← the live knowledge
-├── templates/   ← note templates        ├── automations/← live routine rows
-├── memory/      ← empty skeleton        ├── vaults/     ← federated project vaults
-└── CLAUDE.md    ← this contract         └── skills,systems,templates,agents → (.)meta-os/*
+├── hooks/       ← harness event scripts ├── automations/← live routine rows
+├── templates/   ← note templates        ├── vaults/     ← federated project vaults
+├── memory/      ← empty skeleton        └── skills,systems,templates,agents → (.)meta-os/*
+└── CLAUDE.md    ← this contract
 ```
 
 Mounts are **symlinks per folder** — to the instance's `.meta-os/` submodule (default)
 or a sibling checkout (developer mode; see [[systems/distribution]]) — so
 vault-root-relative wikilinks (`[[skills/…]]`, `[[systems/…]]`) resolve identically in
-both repos.
+both repos. `hooks/` is **not** a fifth mount: hook scripts are not vault content and
+carry no wikilinks, so they are staged into the engine surface rather than symlinked
+into the graph. The four vault mounts are unchanged.
 
 ## Conventions (apply in framework and instance alike)
 
@@ -44,6 +47,11 @@ both repos.
   file; read it first when you enter a folder. Keeps navigation token-efficient at scale.
 - **Skills live in `skills/` and only there.** Discovery is via symlinks
   (`~/.claude/skills/<name> → meta-os/skills/<name>`). Never create a second real copy.
+- **Hooks ship, they do not switch themselves on.** [[hooks/_index|hooks/]] carries
+  harness-executed event scripts; a hook is executable code, so enabling one is an
+  explicit, per-hook user decision — the same rule [[systems/packs]] sets for pack hooks,
+  applied to the framework's own. *Ships by default* and *runs by default* are different
+  claims; only the first is ever true here.
 - **Memory promotion is deliberate.** Capture lands in `memory/raw/`; only *promoted*
   notes (cleaned, front-mattered, linked) enter `memory/wiki/`. Don't cite `raw/`.
 - **Link liberally** with `[[wikilinks]]`; a link to a not-yet-existing note is a TODO

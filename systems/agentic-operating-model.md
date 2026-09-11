@@ -47,8 +47,16 @@ see [[systems/swarm-harness]] and the [[skills/agile-swarm/SKILL|agile-swarm]] s
 
 ## Model routing
 
-Simple mechanical transforms → do them directly (Edit). Simple tasks → Haiku. Architecture,
-security, complex reasoning → Sonnet/Opus. Don't burn a large model on a rename.
+Simple mechanical transforms → do them directly (Edit), no model at all.
+
+| Work | Model |
+|------|-------|
+| Deep research, complex planning | Fable |
+| Everything else — the default | Opus |
+| Trivial text composition; routing/classification | Sonnet |
+
+Opus is the floor for real work; never route below Sonnet. Don't burn a large model on a
+rename — but don't pay for a cheap one on a security review either.
 
 ## Engine routing (which CLI)
 

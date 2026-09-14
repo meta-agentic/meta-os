@@ -241,5 +241,5 @@ MIT ([LICENSE](LICENSE)). The skill library includes MIT-licensed content from
 
 ## Status
 
-Framework v0 — skill library (9 skills), operating-model docs, memory conventions,
+Framework v0 — skill library (6 skills), operating-model docs, memory conventions,
 templates. Extracted from a working single-vault scaffold.

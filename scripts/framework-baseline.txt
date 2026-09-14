@@ -7,31 +7,5 @@
 #     python3 scripts/validate_framework.py --update-baseline
 # Format: <check>\t<path>\t<detail>
 # public-safety findings are never recorded here — see BASELINEABLE.
-index-phantom	skills/_index.md	entry 'agentdb-advanced' does not resolve — no skills/agentdb-advanced/SKILL.md
-index-phantom	skills/_index.md	entry 'agentdb-learning' does not resolve — no skills/agentdb-learning/SKILL.md
-index-phantom	skills/_index.md	entry 'agentdb-memory-patterns' does not resolve — no skills/agentdb-memory-patterns/SKILL.md
-index-phantom	skills/_index.md	entry 'agentdb-optimization' does not resolve — no skills/agentdb-optimization/SKILL.md
-index-phantom	skills/_index.md	entry 'agentdb-vector-search' does not resolve — no skills/agentdb-vector-search/SKILL.md
 index-phantom	skills/_index.md	entry 'agile-process' does not resolve — no skills/agile-process/SKILL.md
 index-phantom	skills/_index.md	entry 'agile-swarm' does not resolve — no skills/agile-swarm/SKILL.md
-index-phantom	skills/_index.md	entry 'browser' does not resolve — no skills/browser/SKILL.md
-index-phantom	skills/_index.md	entry 'flow-nexus-neural' does not resolve — no skills/flow-nexus-neural/SKILL.md
-index-phantom	skills/_index.md	entry 'flow-nexus-platform' does not resolve — no skills/flow-nexus-platform/SKILL.md
-index-phantom	skills/_index.md	entry 'flow-nexus-swarm' does not resolve — no skills/flow-nexus-swarm/SKILL.md
-index-phantom	skills/_index.md	entry 'github-code-review' does not resolve — no skills/github-code-review/SKILL.md
-index-phantom	skills/_index.md	entry 'github-multi-repo' does not resolve — no skills/github-multi-repo/SKILL.md
-index-phantom	skills/_index.md	entry 'github-project-management' does not resolve — no skills/github-project-management/SKILL.md
-index-phantom	skills/_index.md	entry 'github-release-management' does not resolve — no skills/github-release-management/SKILL.md
-index-phantom	skills/_index.md	entry 'github-workflow-automation' does not resolve — no skills/github-workflow-automation/SKILL.md
-index-phantom	skills/_index.md	entry 'reasoningbank-agentdb' does not resolve — no skills/reasoningbank-agentdb/SKILL.md
-index-phantom	skills/_index.md	entry 'sparc-methodology' does not resolve — no skills/sparc-methodology/SKILL.md
-index-phantom	skills/_index.md	entry 'swarm-advanced' does not resolve — no skills/swarm-advanced/SKILL.md
-index-phantom	skills/_index.md	entry 'v3-cli-modernization' does not resolve — no skills/v3-cli-modernization/SKILL.md
-index-phantom	skills/_index.md	entry 'v3-core-implementation' does not resolve — no skills/v3-core-implementation/SKILL.md
-index-phantom	skills/_index.md	entry 'v3-ddd-architecture' does not resolve — no skills/v3-ddd-architecture/SKILL.md
-index-phantom	skills/_index.md	entry 'v3-integration-deep' does not resolve — no skills/v3-integration-deep/SKILL.md
-index-phantom	skills/_index.md	entry 'v3-mcp-optimization' does not resolve — no skills/v3-mcp-optimization/SKILL.md
-index-phantom	skills/_index.md	entry 'v3-memory-unification' does not resolve — no skills/v3-memory-unification/SKILL.md
-index-phantom	skills/_index.md	entry 'v3-performance-optimization' does not resolve — no skills/v3-performance-optimization/SKILL.md
-index-phantom	skills/_index.md	entry 'v3-security-overhaul' does not resolve — no skills/v3-security-overhaul/SKILL.md
-index-phantom	skills/_index.md	entry 'v3-swarm-coordination' does not resolve — no skills/v3-swarm-coordination/SKILL.md

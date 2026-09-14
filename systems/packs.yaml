@@ -77,6 +77,20 @@ packs:
     provides: [agent-architecture, agent-prompting, agent-skills, agent-harness, agent-safety, agent-evaluation, loop-engineering]
     status: available
 
+  visualization:
+    repo: https://github.com/meta-agentic/meta-discipline-visualization
+    ref: main
+    description: "Information-visualization discipline (10 skills planned): a form-selection spine (the encoding chosen from data type × reader task × human perception, before a library is opened), rigor branches (perceptual-accessibility, uncertainty-visualization, visualization-critique), data-shape branches (temporal, geospatial, network-and-graph, hierarchy-and-part-whole) and composition branches (dashboard-and-composition, narrative-and-annotation) — each emitting a checkable ledger. First-party; the presentation end of the evidence-disciplined pipeline, anchored on Bertin, Cleveland & McGill, Munzner, Tufte, Kirk and Lima."
+    provenance: first-party
+    license: MIT
+    provides: []
+    status: planned   # first-party; the repo currently carries the pack SCAFFOLD only —
+                      # metadata, config schema and profiles, and deliberately zero skills.
+                      # Mounting it today would resolve to nothing, which is exactly the
+                      # condition the de-listing note at the foot of this file names as
+                      # disqualifying. Flip to `available` and fill `provides:` in the change
+                      # that migrates the spine skill in.
+
 # Candidates awaiting verification before entering the curated list (community
 # suggestions; upstream owner/repo, license, and mountable-skill layout must be
 # confirmed first — the curation bar in systems/packs.md applies):

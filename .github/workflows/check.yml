@@ -64,12 +64,12 @@ jobs:
       - name: Framework self-check
         run: python scripts/validate_framework.py
 
-      # scripts/validate_pack.py lands with the `feat/pack-conformance-validator`
-      # branch, which is not merged yet. Two wrong answers here: hard-failing on a
-      # branch that legitimately does not carry it, and `|| true`-ing it into
-      # silence. So absence is REPORTED — a warning annotation on the run plus a
-      # line in the job summary — and presence is enforced with the script's own
-      # exit code. The day the branch merges, this step starts gating with no edit.
+      # scripts/validate_pack.py is on `main`, but a ref cut before it landed will
+      # not carry it. Two wrong answers here: hard-failing on a ref that
+      # legitimately does not carry it, and `|| true`-ing it into silence. So
+      # absence is REPORTED — a warning annotation on the run plus a line in the
+      # job summary — and presence is enforced with the script's own exit code.
+      # A ref that carries the script is gated with no edit to this file.
       - name: Pack conformance gate
         env:
           REF_NAME: ${{ github.ref_name }}
@@ -84,9 +84,8 @@ jobs:
               echo "### Pack conformance gate: NOT RUN"
               echo
               echo "\`scripts/validate_pack.py\` is absent on \`${REF_NAME}\`, so the pack"
-              echo "conformance contract was **not** checked in this run. It arrives with the"
-              echo "\`feat/pack-conformance-validator\` branch; this step enforces it automatically"
-              echo "once that branch is merged."
+              echo "conformance contract was **not** checked in this run. The script is on"
+              echo "\`main\` — rebase this ref onto it and the step gates automatically."
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 

@@ -30,6 +30,12 @@ serialize.
 - Independent reviewer + security pass on each PR before merge.
 - PO owns merges and sprint-close.
 
+## Relation to the pipeline
+
+This is the model of **one batch**. What keeps batches flowing — the dispatcher that
+re-populates lanes as items close, the WIP cap, the PO station's limits and the sizing
+rules — is [[systems/swarm-pipeline]], sized by [[systems/swarm-pipeline-queueing]].
+
 ## Relation to the operating model
 
 This is the swarm specialization of [[systems/agentic-operating-model]] — same

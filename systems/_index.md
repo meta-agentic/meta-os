@@ -15,6 +15,8 @@ the procedure. Load the one you need.
 | [[systems/config\|config]] | The three config levels (framework schema · instance estate `meta-os.config.json` · deployment) and the `meta-os.` namespace; [[systems/meta-os.config.schema.json\|meta-os.config.schema.json]] is the machine-readable contract |
 | [[systems/scrum-harness\|scrum-harness]] | The agile process: backlog↔Jira, ceremonies, sprint lifecycle (driven by [[skills/agile-process/SKILL|agile-process]]) |
 | [[systems/swarm-harness\|swarm-harness]] | Parallel multi-lane execution model (driven by [[skills/agile-swarm/SKILL|agile-swarm]]) |
+| [[systems/swarm-pipeline\|swarm-pipeline]] | The swarm as a closed loop: a dispatcher keeps `m` lanes populated over `n` projects under a WIP cap, review and PO stations, auto-merge tier, sizing rules, gauges |
+| [[systems/swarm-pipeline-queueing\|swarm-pipeline-queueing]] | Spike findings sizing the pipeline as a Markovian queueing network — where the ceiling is, what tokens buy, why pooling wins; [[systems/swarm-pipeline-model.py\|swarm-pipeline-model.py]] reproduces every table |
 | [[systems/ontology\|ontology]] | The vault's type system made explicit: note types, tags, relations ([[systems/ontology.yaml\|ontology.yaml]] is the machine-readable contract) |
 | [[systems/interface-layer\|interface-layer]] | Layer 3 contract: what the dashboard reads, how it triggers runs, ontology-driven rendering |
 | [[systems/interface-extensions\|interface-extensions]] | Layer 3 roadmap: the common agentic-dashboard widget set evaluated against the contract — verdicts, new read surfaces, phasing |

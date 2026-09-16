@@ -130,11 +130,14 @@ def ready_items(vault: str, cfg: dict) -> list[Item]:
     items = load_items(vault, executable)
     ready_statuses = set(cfg.get("ready_statuses") or ["REFINED"])
     blockers = set(cfg.get("blocking_labels") or ["blocked", "needs-po"])
+    exclude_title = re.compile(cfg["exclude_title_regex"]) if cfg.get("exclude_title_regex") else None
     out: list[Item] = []
     for it in items.values():
         if it.space not in sprints or it.kind == "epic" or it.status not in ready_statuses:
             continue
         if blockers & set(it.labels):
+            continue
+        if exclude_title and exclude_title.search(it.title):
             continue
         if any(items.get(d, Item(d, "", "", "", "", 0, "", [], [], False, "")).status != "DONE" for d in it.dependencies):
             continue

@@ -14,6 +14,7 @@ vault instead — this repo is the generic layer it mounts.
 | [[skills/_index\|skills/]] | The skill library — Layer 1 backbone |
 | [[systems/_index\|systems/]] | How the OS operates — operating model, memory, process & swarm harnesses |
 | [[hooks/_index\|hooks/]] | Harness-executed event scripts — shipped, never auto-wired |
+| [[pipeline/_index\|pipeline/]] | The autonomous swarm loop, deterministic half — ready set, regulator, reflection, speculation, ledger; an instance supplies config and a harness |
 | [[agents/_index\|agents/]] | Agent roster + coordination patterns |
 | [[templates/_index\|templates/]] | Note templates |
 | memory/ | Empty `raw → wiki → output` skeleton with conventions — instances own the live one |

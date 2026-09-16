@@ -29,6 +29,7 @@ meta-os/  (this repo — PUBLIC-SAFE)      <instance>/  (private — the vault y
 ├── systems/     ← how the OS operates   ├── projects/   ← estate registry
 ├── agents/      ← roster + patterns     ├── memory/     ← the live knowledge
 ├── hooks/       ← harness event scripts ├── automations/← live routine rows
+├── pipeline/    ← autonomous swarm loop  │
 ├── templates/   ← note templates        ├── vaults/     ← federated project vaults
 ├── memory/      ← empty skeleton        └── skills,systems,templates,agents → (.)meta-os/*
 └── CLAUDE.md    ← this contract

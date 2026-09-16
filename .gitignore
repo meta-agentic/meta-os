@@ -33,3 +33,8 @@ ruvector.db
 **/ruvector.db
 *.db-wal
 *.db-shm
+
+# Python caches
+__pycache__/
+*.pyc
+

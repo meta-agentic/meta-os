@@ -86,10 +86,21 @@ def cmd_plan(cfg: dict, led: Ledger, out_path: str | None) -> int:
         d_cost = sum(usage_delta(l)[0] for l in lanes)
         spent = sum(float((l.get("usage") or [{}])[-1].get("cost_usd", 0.0)) for l in lanes)
         burn = d_cost / hours
-        rate_status = severity([(l.get("usage") or [{}])[-1].get("rate_status", "allowed") for l in lanes])
+        # Rate status is read only from snapshots taken at the latest record step: a rejection
+        # seen last tick must not freeze the pipeline forever once the limit has reset.
+        latest_ts = max((float(s.get("ts", 0)) for l in lanes for s in (l.get("usage") or [])), default=0.0)
+        rate_status = severity([s.get("rate_status", "allowed") for l in lanes for s in (l.get("usage") or [])
+                                if float(s.get("ts", 0)) >= latest_ts - 60])
+        # The harness may report the account's own status at record time (needed when no lane
+        # is running to observe it through); the fresher reading wins.
+        acct = state.get("account_rate_status") or {}
+        if acct and float(acct.get("ts", 0)) >= latest_ts:
+            rate_status = severity([acct.get("status", "allowed")])
 
         # ---- ready set and saturation
-        ready = readyset.ready_items(cfg["vault"], cfg)
+        retries: dict = state.get("retries") or {}
+        max_retries = int(cfg.get("max_retries", 2))
+        ready = [it for it in readyset.ready_items(cfg["vault"], cfg) if int(retries.get(it.id, 0)) < max_retries]
         active = [l for l in lanes if l.get("status") in ACTIVE]
         lanes_saturated = len(active) >= int(state["N"]) and bool(ready)
 
@@ -216,10 +227,13 @@ def vault_commit(cfg: dict, message: str) -> str:
     gate = subprocess.run([sys.executable, os.path.join(v, "scripts", "validate_items.py")], cwd=v, capture_output=True, text=True)
     if gate.returncode != 0:
         return "gate failed: " + gate.stdout[-400:] + gate.stderr[-400:]
-    g("add", "-A", "--", "*/raw", "*/wiki", "*/output", "*/_index.md", "*/_backlog-meta.yaml")
+    # Stage only the spaces this pipeline writes to (directories, not shell globs: there is
+    # no shell here and git's own glob would not expand `*/raw` reliably).
+    spaces = [s for s in (cfg.get("spaces") or {}) if os.path.isdir(os.path.join(v, s))]
+    g("add", "-A", "--", *spaces)
     c = g("commit", "-q", "-m", message)
     if c.returncode != 0:
-        return "commit failed: " + c.stderr[-300:]
+        return "commit failed: " + (c.stdout + c.stderr)[-300:]
     p = g("push", "-q", "origin", "main")
     return "pushed" if p.returncode == 0 else "push failed: " + p.stderr[-300:]
 
@@ -233,6 +247,9 @@ def cmd_record(cfg: dict, led: Ledger, results_path: str) -> int:
         state = led.state({"N": 1, "tick": 0, "spent": 0.0})
         lanes = led.lanes()
         by_id = {l["lane_id"]: l for l in lanes}
+        if res.get("account_rate_status"):
+            state["account_rate_status"] = {"status": res["account_rate_status"], "ts": now}
+            led.event("account_rate_status", status=res["account_rate_status"])
         for s in res.get("spawned") or []:
             lane = by_id.get(s["lane_id"])
             if not lane:
@@ -274,6 +291,14 @@ def cmd_record(cfg: dict, led: Ledger, results_path: str) -> int:
                     lane["status"] = "ended_no_pr"
                 else:
                     lane["status"] = "failed" if st == "failed" else "ended_empty"
+                    # Nothing was produced: hand the item back to the ready set (single writer),
+                    # counting the attempt so a broken item cannot be retried forever.
+                    if lane["kind"] == "work" and lane.get("item"):
+                        rc, msg = backlog(cfg, "transition", lane["item"], "REFINED")
+                        led.event("transition", item=lane["item"], to="REFINED", rc=rc, msg=msg[-200:])
+                        if rc == 0:
+                            transitions.append(f"{lane['item']} → REFINED (lane {lane['lane_id']} {lane['status']}; retry {int((state.get('retries') or {}).get(lane['item'], 0)) + 1})")
+                        state.setdefault("retries", {})[lane["item"]] = int((state.get("retries") or {}).get(lane["item"], 0)) + 1
                 led.event("lane_ended", lane_id=lane["lane_id"], status=lane["status"], item=lane.get("item"))
         for lid in res.get("interrupted") or []:
             lane = by_id.get(lid)

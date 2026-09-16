@@ -504,8 +504,17 @@ def license_holder(pack: Path) -> str | None:
 
 
 def holder_pattern(holder: str):
-    """The holder hunted case-insensitively, at token boundaries."""
-    return re.compile(r"(?<![A-Za-z0-9])" + re.escape(holder) + r"(?![A-Za-z0-9])",
+    """The holder hunted case-insensitively, at token boundaries, across line breaks.
+
+    Whitespace INSIDE the name matches any run of whitespace, so a holder broken
+    over a wrapped paragraph — the ordinary result of reflowing Markdown — is
+    still the holder. Matching line by line would make a text editor's wrap
+    setting decide whether the gate fires, which is not a narrowing anyone
+    ratified. The name is still matched as a WHOLE phrase: its individual words
+    are not hunted, so ordinary prose that happens to reuse one is untouched.
+    """
+    words = [re.escape(w) for w in holder.split()] or [re.escape(holder)]
+    return re.compile(r"(?<![A-Za-z0-9])" + r"\s+".join(words) + r"(?![A-Za-z0-9])",
                       re.IGNORECASE)
 
 
@@ -520,10 +529,26 @@ def check_estate_neutral(pack: Path, findings: list[Finding]) -> None:
     for f in pack_text_files(pack):
         in_pack = f.relative_to(pack).as_posix()
         try:
-            lines = f.read_text(encoding="utf-8").splitlines()
+            text = f.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
+        lines = text.splitlines()
         holder_exempt = in_pack in HOLDER_EXEMPT_FILES
+
+        # The holder is matched against the WHOLE file, not line by line, so a
+        # wrapped name cannot slip through; the line number is recovered from the
+        # match offset. The holder itself is deliberately NOT echoed: the file and
+        # line are enough to find it, and a gate that reprints the name it is
+        # objecting to spreads it into every log that reads the run.
+        if holder_re and not holder_exempt:
+            for m in holder_re.finditer(text):
+                line_no = text.count("\n", 0, m.start()) + 1
+                findings.append(Finding(
+                    "estate-neutral", f"{rel(f)}:{line_no}",
+                    "names the pack's LICENSE copyright holder outside "
+                    f"{sorted(HOLDER_EXEMPT_FILES)} — a holder's name is exempt in "
+                    "LICENSE (ratified) and is an instance identifier everywhere else"))
+
         for n, line in enumerate(lines, 1):
             where = f"{rel(f)}:{n}"
             for token in TRACKER_KEY_RE.findall(line):
@@ -539,15 +564,6 @@ def check_estate_neutral(pack: Path, findings: list[Finding]) -> None:
                 findings.append(Finding(
                     "estate-neutral", where,
                     "absolute home path — a machine path is instance data"))
-            # The holder itself is deliberately NOT echoed: the file and line are
-            # enough to find it, and a gate that reprints the name it is objecting
-            # to spreads it into every log that reads the run.
-            if holder_re and not holder_exempt and holder_re.search(line):
-                findings.append(Finding(
-                    "estate-neutral", where,
-                    "names the pack's LICENSE copyright holder outside "
-                    f"{sorted(HOLDER_EXEMPT_FILES)} — a holder's name is exempt in "
-                    "LICENSE (ratified) and is an instance identifier everywhere else"))
 
 
 # --- per-pack driver -------------------------------------------------------

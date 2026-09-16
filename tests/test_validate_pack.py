@@ -177,6 +177,21 @@ class LicenceExemption(PackGateTestCase):
                           + f"\nA note from {HOLDER.lower()}.\n", encoding="utf-8")
         self.assertFails(pack, "estate-neutral")
 
+    def test_holder_match_survives_a_wrapped_line(self):
+        """A name broken over a wrapped paragraph is the same name.
+
+        Matching line by line would let a text editor's wrap column decide
+        whether the gate fires — a narrowing nobody ratified, and one an author
+        could apply by reflowing a sentence.
+        """
+        pack = self.stage()
+        readme = pack / "README.md"
+        first, rest = HOLDER.split(" ", 1)
+        readme.write_text(readme.read_text(encoding="utf-8")
+                          + f"\nWith thanks to {first}\n{rest} for the review.\n",
+                          encoding="utf-8")
+        self.assertFails(pack, "estate-neutral")
+
     def test_holder_match_respects_token_boundaries(self):
         """`Example Holder` must not fire on `Example Holdership`."""
         pack = self.stage()

@@ -82,10 +82,21 @@ def cmd_plan(cfg: dict, led: Ledger, out_path: str | None) -> int:
         hours = ((now - state["last_tick_ts"]) / 3600.0) if state.get("last_tick_ts") else float(cfg.get("tick_hours", 1.0))
         hours = max(hours, 1e-3)
 
-        # ---- sensor
-        d_cost = sum(usage_delta(l)[0] for l in lanes)
+        # ---- sensor: burn is the sum over lanes of (cost delta / elapsed) between each lane's
+        # last two usage snapshots (or since its start when it has one), so a record step that
+        # carried no usage cannot shrink the interval and inflate the reading.
+        burn = 0.0
+        for l in lanes:
+            snaps = l.get("usage") or []
+            if not snaps:
+                continue
+            d_cost = usage_delta(l)[0]
+            t1 = float(snaps[-1].get("ts", now))
+            t0 = float(snaps[-2].get("ts", t1)) if len(snaps) > 1 else float(l.get("started") or l.get("planned_ts") or t1)
+            dt_h = max((t1 - t0) / 3600.0, 1.0 / 60.0)
+            if l.get("status") in ACTIVE or (now - t1) < 3600 * float(cfg.get("tick_hours", 1.0)):
+                burn += d_cost / dt_h
         spent = sum(float((l.get("usage") or [{}])[-1].get("cost_usd", 0.0)) for l in lanes)
-        burn = d_cost / hours
         # Rate status is read only from snapshots taken at the latest record step: a rejection
         # seen last tick must not freeze the pipeline forever once the limit has reset.
         latest_ts = max((float(s.get("ts", 0)) for l in lanes for s in (l.get("usage") or [])), default=0.0)

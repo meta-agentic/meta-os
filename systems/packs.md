@@ -183,6 +183,55 @@ Three rules the schema encodes that are easy to get wrong from examples alone:
 - **Profiles are optional.** Ship them only for genuine methodology variants; a pack with
   one mode says so instead of inventing a split to look like its siblings.
 
+### The gate — who actually checks this
+
+The contract above is enforced by a program, on every pull request, in every pack's own
+repository. That matters more than it sounds: a checklist applied once by a reviewer at
+merge time establishes conformance for one commit and never again, so a pack drifts and
+nothing says so.
+
+**One checker, one home.** `scripts/validate_pack.py` in the framework repo is the only
+pack conformance checker in the estate. It validates `pack.yaml` against
+[[systems/pack.schema.json|pack.schema.json]], applies the `required_files` checklist
+(including the per-skill shape), validates any `meta-os.config.json`, and runs the
+**estate-neutral scan** — a pack is published on its own, so it must carry no tracker
+key, no absolute machine path, and no name of whoever authored it. A pack never vendors
+a copy: point the script at a checkout and it reads the contract from the framework.
+
+```bash
+python3 scripts/validate_pack.py ../meta-discipline-<name>
+```
+
+**The LICENSE exemption.** A copyright holder's name in `LICENSE` is *not* an instance
+identifier — that is the ratified reading, and it lives in the checker rather than in a
+review comment. The gate reads the holder out of the pack's own `LICENSE` and then hunts
+that exact string through every other file, so the exemption is narrow in both
+directions: the holder in `LICENSE` passes, the same holder in a skill file fails, and a
+tracker key inside `LICENSE` fails like anywhere else.
+
+**Adopting it costs one file.** A pack repository adds
+`.github/workflows/pack-conformance.yml` containing nothing but a call:
+
+```yaml
+name: pack conformance
+"on":
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  conformance:
+    uses: meta-agentic/meta-os/.github/workflows/pack-conformance.yml@main
+```
+
+Make that job a required check and the pack's acceptance criteria are re-checked on
+every change. The reusable workflow takes `pack-path` (for a pack that is not at the
+repository root), `framework-ref` (pin a tag or SHA to decide for yourself when the
+contract moves), `python-version` and `strict`.
+
+The gate's own fixture packs — one conforming, one deliberately violating — live in the
+framework's `tests/fixtures/`, so a change that weakens the contract fails the
+framework's build rather than passing quietly.
+
 ## Dependencies between packs
 
 Packs reuse each other: the physics pack consumes the math pack's `dimensional-analysis`

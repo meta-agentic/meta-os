@@ -75,6 +75,21 @@ SKILL_NAME = "SKILL.md"
 # conversation to have if the project prefers the literal reading.
 SKILL_DIRS_ARE_EXEMPT_FROM_INDEX = True
 
+# The second reading of the same convention, declared the same way. `tests/fixtures/`
+# holds the control packs for the pack conformance gate: they are INPUTS to a checker,
+# not navigational folders in the vault, and a pack root does not carry an `_index.md`
+# in the first place — the contract in `systems/pack.schema.json` says what a pack
+# ships, and that is not it. So everything strictly BELOW `tests/fixtures/` is exempt,
+# while `tests/` and `tests/fixtures/` themselves are ordinary folders and carry their
+# own index. Set this to False and the fixture packs start failing immediately, which
+# is the conversation to have if the project prefers the literal reading.
+FIXTURE_PACKS_ARE_EXEMPT_FROM_INDEX = True
+FIXTURES_DIR = ROOT / "tests" / "fixtures"
+
+# Build output, not a folder anyone navigates. Gitignored, so it is never published —
+# but the walk below reads the working tree, which may carry it after a gate has run.
+TOOL_DIRS = {"__pycache__"}
+
 # ---------------------------------------------------------------------------
 # Public-safety scan. This repo is public; a leaked instance identifier is not
 # retractable once pushed, so this class NEVER enters the baseline (see
@@ -323,17 +338,21 @@ def check_systems_front_matter(findings: list[Finding], note_types: set[str]) ->
 def check_folder_index(findings: list[Finding]) -> None:
     """4. Every navigational folder has an _index.md.
 
-    Dot-directories are VCS/editor/tool state, not navigable content, and are
-    never walked. Everything else is — including `scripts/`, which carries its
-    own `_index.md` rather than an exemption written for its own benefit. The
-    one real exemption is skill directories; it is declared and explained at
-    `SKILL_DIRS_ARE_EXEMPT_FROM_INDEX`.
+    Dot-directories and bytecode caches (`TOOL_DIRS`) are VCS/editor/tool state,
+    not navigable content, and are never walked. Everything else is — including
+    `scripts/` and `tests/`, which carry their own `_index.md` rather than an
+    exemption written for their own benefit. There are exactly two real
+    exemptions, each declared and explained where it is defined:
+    `SKILL_DIRS_ARE_EXEMPT_FROM_INDEX` (a skill directory is self-describing) and
+    `FIXTURE_PACKS_ARE_EXEMPT_FROM_INDEX` (a fixture pack is a gate's input).
     """
     for d in sorted(p for p in ROOT.rglob("*") if p.is_dir()):
         rel_parts = d.relative_to(ROOT).parts
-        if any(part.startswith(".") for part in rel_parts):
+        if any(part.startswith(".") or part in TOOL_DIRS for part in rel_parts):
             continue
         if SKILL_DIRS_ARE_EXEMPT_FROM_INDEX and in_skill_subtree(d):
+            continue
+        if FIXTURE_PACKS_ARE_EXEMPT_FROM_INDEX and FIXTURES_DIR in d.parents:
             continue
         if not (d / INDEX_NAME).is_file():
             findings.append(Finding(

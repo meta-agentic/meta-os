@@ -8,10 +8,18 @@ checklist a reviewer *or script* applies", and no such script existed. So the
 half of the contract that says which files a pack must ship was enforced by
 nobody. This is that script.
 
-Self-contained on purpose, and deliberately shaped like `validate_framework.py`
-next to it (and the vault's `validate_items.py` / `validate_sprints.py`) — same
-`Finding`, same baseline ratchet, same exit convention — so one gate reads like
-the other across the estate.
+Deliberately shaped like `validate_framework.py` next to it (and the vault's
+`validate_items.py` / `validate_sprints.py`) — same `Finding`, same baseline
+ratchet, same exit convention — so one gate reads like the other across the
+estate. It borrows exactly three names from that sibling (the tracker-key
+pattern, its allow-list, and the text-suffix set) so that widening the
+allow-list stays ONE visible diff for the whole estate rather than two that can
+drift apart.
+
+This script is the single home of the pack conformance checker: a pack lives in
+its own repository and adopts it with a one-file caller workflow that points at
+`.github/workflows/pack-conformance.yml` here. Nothing about a pack's conformance
+may depend on a script that exists only on someone's machine.
 
 What it checks
 --------------
@@ -22,11 +30,15 @@ What it checks
    (front-matter `name`/`description`, and the named `##` sections).
 4. `meta-os.config.json` validates against `systems/meta-os.config.schema.json`
    wherever one is present.
+5. The pack is **estate-neutral** — it carries no instance-specific identifier.
+   Same rule `validate_framework.py` applies to meta-os itself, applied to a pack
+   tree, including the ratified LICENSE exemption. See ESTATE-NEUTRAL below.
 
 Usage
 -----
     python3 scripts/validate_pack.py                       # discover packs in-repo
     python3 scripts/validate_pack.py path/to/pack          # one pack directory
+                                                           # (works from any repo)
     python3 scripts/validate_pack.py --strict              # every warning is an error
     python3 scripts/validate_pack.py --update-baseline     # re-record accepted debt
 
@@ -39,7 +51,7 @@ Identical to `validate_framework.py`:
   * `--strict` promotes every WARN to an ERROR;
   * `--update-baseline` re-records the current debt.
 
-Two classes opt out of the ratchet (see `BASELINEABLE`), for the same reason
+Three classes opt out of the ratchet (see `BASELINEABLE`), for the same reason
 `validate_framework.py` exempts its public-safety scan: accepting them as debt
 would mean accepting that the gate itself is not running.
 
@@ -73,6 +85,16 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     sys.exit("jsonschema required: pip3 install jsonschema")
 
+# The sibling gate owns the estate's public-safety primitives; this one reuses them
+# rather than restating them, so the allow-list has a single home. Both scripts ship
+# together in scripts/ — the reusable workflow checks out this repo, never one file.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from validate_framework import (  # noqa: E402  (path set up immediately above)
+    PUBLIC_SAFETY_ALLOWED_TOKENS,
+    TEXT_SUFFIXES,
+    TRACKER_KEY_RE,
+)
+
 ROOT = Path(__file__).resolve().parent.parent
 PACK_SCHEMA = ROOT / "systems" / "pack.schema.json"
 CONFIG_SCHEMA = ROOT / "systems" / "meta-os.config.schema.json"
@@ -83,7 +105,8 @@ CONFIG_NAME = "meta-os.config.json"
 SKILL_NAME = "SKILL.md"
 
 # Directories never walked when discovering packs in-repo: VCS/editor/tool state.
-SKIP_DIRS = {".git", ".idea", ".obsidian", ".claude", ".claude-flow", "node_modules"}
+SKIP_DIRS = {".git", ".idea", ".obsidian", ".claude", ".claude-flow",
+             "node_modules", "__pycache__"}
 
 # Keywords introduced after draft-07. If `pack.schema.json` grows one of these,
 # Draft7Validator would silently ignore it — so the gate stops instead. Listing
@@ -99,13 +122,84 @@ POST_DRAFT7_KEYWORDS = frozenset({
 # A `<placeholder>` inside a required_files entry.
 PLACEHOLDER_RE = re.compile(r"<([a-z_]+)>")
 
+# Path prefixes the in-repo sweep never descends into. `tests/fixtures` holds this
+# gate's own positive and negative controls, and one of those packs is
+# non-conformant BY DESIGN — discovering it here would make meta-os fail its own
+# gate for shipping a test input. The fixtures are checked by pointing the gate at
+# them explicitly, which is what tests/test_validate_pack.py does.
+EXCLUDED_FROM_DISCOVERY = (("tests", "fixtures"),)
+
+# ---------------------------------------------------------------------------
+# ESTATE-NEUTRAL — a pack must carry no instance-specific identifier.
+# ---------------------------------------------------------------------------
+# A pack is published on its own, so whatever estate authored it must not be
+# legible from its contents. This is `validate_framework.py`'s `public-safety`
+# rule applied to a pack tree, and like its sibling it NEVER enters the baseline
+# (see BASELINEABLE): a leak in a published pack has no undo, so it fails the gate
+# on sight rather than warning.
+#
+# Three identifier classes, and exactly one exemption:
+#
+#   1. tracker keys        `<PREFIX>-<number>`     — no exemption, LICENSE included
+#   2. absolute home paths `/Users/…`, `/home/…`   — no exemption, LICENSE included
+#   3. the LICENSE copyright holder                — EXEMPT IN LICENSE, nowhere else
+#
+# Class 3 encodes the ratified LICENSE exemption (product-owner decision,
+# 2026-09-14): *a copyright holder's name in LICENSE is not an instance
+# identifier*. It is encoded rather than asserted in a review comment — the gate
+# reads the holder out of the pack's own LICENSE and then hunts that exact string
+# through every OTHER file. So the adversarial pair is decided by the checker: the
+# holder in LICENSE passes, the same holder in a skill file fails.
+#
+# The exemption is NARROW in both directions, which is the point. It exempts one
+# file from one class: a tracker key or a machine path inside LICENSE still fails,
+# and the holder name in PROVENANCE.md still fails. Widening it (a third-party
+# pack whose PROVENANCE.md must name its upstream is the obvious candidate) is a
+# one-line change to this constant, reviewable as such.
+HOLDER_EXEMPT_FILES = frozenset({"LICENSE"})
+
+# Broader than the sibling gate's equivalent on purpose: meta-os is authored in one
+# estate, whereas a pack can be authored anywhere, and `/home/<user>` is as much a
+# machine path as `/Users/<user>`.
+HOME_PATH_RE = re.compile(r"(?:/Users|/home|/export/home)/[A-Za-z0-9._-]+")
+
+# The attribution line of a licence: the word, an optional (c)/© marker, an optional
+# year or year span, then the holder. The marker-or-year is REQUIRED (enforced in
+# `license_holder`) so that prose in the licence body — "The above copyright notice
+# and this permission notice shall be included…" — is not read as an attribution.
+COPYRIGHT_RE = re.compile(
+    r"copyright\b\s*(?P<marker>\(c\)|©)?\s*"
+    r"(?P<years>[0-9]{4}(?:\s*[-–,]\s*[0-9]{4})*)?\s*"
+    r"(?P<holder>\S.*?)\s*$",
+    re.IGNORECASE)
+
+# A trailing rights reservation is boilerplate, not part of the holder's name.
+ALL_RIGHTS_RE = re.compile(r"[.,;]?\s*all rights reserved\.?\s*$", re.IGNORECASE)
+
+# Holders that name nobody. An unfilled licence template ("<name of copyright
+# owner>") or a generic phrase must never become the string this gate hunts — it
+# would match half the tree and the gate would be reporting on itself.
+HOLDER_BOILERPLATE = frozenset({
+    "author", "authors", "the author", "the authors",
+    "copyright holder", "copyright holders",
+    "the copyright holder", "the copyright holders",
+    "name of copyright owner", "copyright owner", "the copyright owner",
+    "owner", "the owner", "notice", "year", "the year",
+})
+
+# Below this length a "holder" is too generic to hunt without false positives.
+MIN_HOLDER_LEN = 4
+
 # Which classes may be silenced by the baseline.
 #
 # `checklist-placeholder` may not: it fires when this gate cannot interpret the
 # schema's own checklist, and a silenced finding there means the checklist is
 # being skipped rather than applied. `pack-manifest` may not either: when the
 # manifest does not parse, nothing below it can run, and a YAML parse message is
-# not a stable baseline key anyway.
+# not a stable baseline key anyway. `estate-neutral` may not, for the reason its
+# own section gives: a published leak has no undo, and recording one in a
+# committed baseline file would make that file carry the very string being
+# flagged.
 BASELINEABLE = {
     "pack-manifest": False,
     "pack-schema": True,
@@ -114,6 +208,7 @@ BASELINEABLE = {
     "pack-skill-shape": True,
     "config-schema": True,
     "checklist-placeholder": False,
+    "estate-neutral": False,
 }
 
 
@@ -132,12 +227,23 @@ class Finding:
         return f"{self.path}: {self.detail}  [{self.check}]"
 
 
+# Directories a finding's path may be rendered against, beyond ROOT. main() adds the
+# parent of every pack named on the command line, so a pack checked from OUTSIDE this
+# repo — the reusable workflow's whole purpose — still reports `<pack-dir>/skills/…`
+# rather than the runner's absolute path. A gate whose own output carries a machine
+# path is not estate-neutral either.
+DISPLAY_ROOTS: list[Path] = []
+
+
 def rel(p: Path) -> str:
-    """Repo-relative path where possible — baseline keys must not carry a machine path."""
-    try:
-        return str(p.resolve().relative_to(ROOT))
-    except ValueError:
-        return str(p)
+    """Path rendered against a known root — baseline keys must not carry a machine path."""
+    resolved = p.resolve()
+    for base in (ROOT, *DISPLAY_ROOTS):
+        try:
+            return str(resolved.relative_to(base))
+        except ValueError:
+            continue
+    return resolved.name
 
 
 def front_matter(path: Path):
@@ -217,11 +323,14 @@ def discover_packs() -> list[Path]:
     In meta-os itself that is the authoring skeleton shipped inside
     skills/pack-builder/resources/ — real packs live in their own repositories
     and are validated by pointing this script at a checkout.
+    `EXCLUDED_FROM_DISCOVERY` says which subtrees the sweep refuses to enter.
     """
     packs: list[Path] = []
     for p in ROOT.rglob(MANIFEST_NAME):
         parts = p.relative_to(ROOT).parts
         if any(part in SKIP_DIRS for part in parts):
+            continue
+        if any(parts[:len(prefix)] == prefix for prefix in EXCLUDED_FROM_DISCOVERY):
             continue
         packs.append(p.parent)
     return sorted(packs)
@@ -341,6 +450,106 @@ def check_per_skill(pack: Path, per_skill, findings: list[Finding]) -> None:
                     f"(required_files.per_skill.sections)"))
 
 
+# --- the estate-neutral scan -----------------------------------------------
+
+def pack_text_files(pack: Path):
+    """Every text file in the pack, skipping VCS/editor/tool state.
+
+    A filesystem walk rather than `git ls-files`: a pack may be checked as a
+    subdirectory, as a fresh checkout, or as a temporary tree in a test, and the
+    rule is about what the pack CONTAINS either way.
+    """
+    for p in sorted(pack.rglob("*")):
+        if any(part in SKIP_DIRS for part in p.relative_to(pack).parts):
+            continue
+        if not p.is_file() or p.suffix.lower() not in TEXT_SUFFIXES:
+            continue
+        yield p
+
+
+def clean_holder(raw: str) -> str | None:
+    """The holder name from a matched attribution line, or None if it names nobody."""
+    holder = ALL_RIGHTS_RE.sub("", raw.strip()).strip(" \t.,;:")
+    # `<name>` / `[name of copyright owner]`: an unfilled template names nobody, and
+    # hunting a placeholder through the tree would match half of it.
+    if not holder or any(ch in holder for ch in "<>[]"):
+        return None
+    if holder.lower() in HOLDER_BOILERPLATE or len(holder) < MIN_HOLDER_LEN:
+        return None
+    return holder
+
+
+def license_holder(pack: Path) -> str | None:
+    """The copyright holder named on the pack's LICENSE attribution line, or None.
+
+    The FIRST line that carries the word *copyright* together with a (c)/© marker or
+    a year wins; a pack with no LICENSE, or whose LICENSE names nobody, simply has no
+    holder to hunt (the missing LICENSE is already a `pack-required-file` finding).
+    """
+    lic = pack / "LICENSE"
+    if not lic.is_file():
+        return None
+    try:
+        text = lic.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError):
+        return None
+    for line in text.splitlines():
+        m = COPYRIGHT_RE.search(line)
+        if not m or not (m.group("marker") or m.group("years")):
+            continue
+        holder = clean_holder(m.group("holder"))
+        if holder:
+            return holder
+    return None
+
+
+def holder_pattern(holder: str):
+    """The holder hunted case-insensitively, at token boundaries."""
+    return re.compile(r"(?<![A-Za-z0-9])" + re.escape(holder) + r"(?![A-Za-z0-9])",
+                      re.IGNORECASE)
+
+
+def check_estate_neutral(pack: Path, findings: list[Finding]) -> None:
+    """5. No instance identifier in the pack. Never baselined, never a warning.
+
+    The LICENSE exemption (see ESTATE-NEUTRAL at the top of this file) applies to the
+    holder class only, and only inside the files named in `HOLDER_EXEMPT_FILES`.
+    """
+    holder = license_holder(pack)
+    holder_re = holder_pattern(holder) if holder else None
+    for f in pack_text_files(pack):
+        in_pack = f.relative_to(pack).as_posix()
+        try:
+            lines = f.read_text(encoding="utf-8").splitlines()
+        except (UnicodeDecodeError, OSError):
+            continue
+        holder_exempt = in_pack in HOLDER_EXEMPT_FILES
+        for n, line in enumerate(lines, 1):
+            where = f"{rel(f)}:{n}"
+            for token in TRACKER_KEY_RE.findall(line):
+                if token in PUBLIC_SAFETY_ALLOWED_TOKENS:
+                    continue
+                findings.append(Finding(
+                    "estate-neutral", where,
+                    f"looks like an instance tracker key: {token!r} — a pack is "
+                    f"published on its own and must name no estate (if it is a "
+                    f"standards identifier, add the exact token to "
+                    f"PUBLIC_SAFETY_ALLOWED_TOKENS in validate_framework.py)"))
+            if HOME_PATH_RE.search(line):
+                findings.append(Finding(
+                    "estate-neutral", where,
+                    "absolute home path — a machine path is instance data"))
+            # The holder itself is deliberately NOT echoed: the file and line are
+            # enough to find it, and a gate that reprints the name it is objecting
+            # to spreads it into every log that reads the run.
+            if holder_re and not holder_exempt and holder_re.search(line):
+                findings.append(Finding(
+                    "estate-neutral", where,
+                    "names the pack's LICENSE copyright holder outside "
+                    f"{sorted(HOLDER_EXEMPT_FILES)} — a holder's name is exempt in "
+                    "LICENSE (ratified) and is an instance identifier everywhere else"))
+
+
 # --- per-pack driver -------------------------------------------------------
 
 def check_pack(pack: Path, validator, schema, findings: list[Finding]) -> None:
@@ -452,12 +661,17 @@ def main() -> None:
                  "Run it with no pack arguments.")
 
     packs = [p.resolve() for p in args.packs] if args.packs else discover_packs()
+    # Render out-of-repo findings against the pack's own parent — see DISPLAY_ROOTS.
+    DISPLAY_ROOTS.extend(p.parent for p in packs)
     if not packs:
         print("no packs found — nothing to check "
               f"(looked for {MANIFEST_NAME} under {ROOT})")
         return
     for pack in packs:
         check_pack(pack, validator, schema, findings)
+        # Estate-neutrality is a property of the tree, not of the manifest, so it is
+        # checked even when the manifest itself failed to parse.
+        check_estate_neutral(pack, findings)
 
     check_config_files([ROOT / CONFIG_NAME] + [p / CONFIG_NAME for p in packs], findings)
 

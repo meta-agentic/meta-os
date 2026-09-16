@@ -17,7 +17,8 @@ vault instead — this repo is the generic layer it mounts.
 | [[agents/_index\|agents/]] | Agent roster + coordination patterns |
 | [[templates/_index\|templates/]] | Note templates |
 | memory/ | Empty `raw → wiki → output` skeleton with conventions — instances own the live one |
-| [[scripts/_index\|scripts/]] | The framework's own self-check gate (wired as `.githooks/pre-commit`) |
+| [[scripts/_index\|scripts/]] | The framework's own self-check gate, and the pack conformance gate every pack repo calls |
+| [[tests/_index\|tests/]] | What proves those gates still gate — fixture packs and the suite that drives them |
 
 ## What's deliberately NOT here
 

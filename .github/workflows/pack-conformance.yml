@@ -1,0 +1,110 @@
+# The pack conformance gate, as a workflow any pack repository can call.
+#
+# A pack lives in its own repository; the checker lives here, once. A pack repo adopts
+# the gate with ONE file — `.github/workflows/pack-conformance.yml` in that repo:
+#
+#     name: pack conformance
+#     "on":
+#       pull_request:
+#       push:
+#         branches: [main]
+#     jobs:
+#       conformance:
+#         uses: meta-agentic/meta-os/.github/workflows/pack-conformance.yml@main
+#
+# Add that job to the repository's required checks and the pack's acceptance criteria
+# are re-checked on every pull request, instead of once by a reviewer at merge time.
+# Pin `@main` to a tag or commit SHA where the pack wants the contract to move only on
+# a deliberate bump.
+name: pack conformance (reusable)
+
+# Quoted: bare `on` is a YAML 1.1 boolean, so an unquoted key parses as True in PyYAML
+# and any other 1.1 loader. Actions reads either; quoting keeps the file honest under
+# `yaml.safe_load`, which is how tests/test_validate_pack.py validates it.
+"on":
+  workflow_call:
+    inputs:
+      pack-path:
+        description: "Pack directory, relative to the calling repository's root."
+        type: string
+        default: "."
+      framework-ref:
+        description: >-
+          Ref of meta-os to take the checker and the pack contract from. Pin a tag or
+          SHA to decide for yourself when the contract moves.
+        type: string
+        default: "main"
+      python-version:
+        description: "Interpreter the gate runs on."
+        type: string
+        default: "3.10"
+      strict:
+        description: >-
+          Promote every accepted-debt warning to an error. Off by default so adopting
+          the gate is not a flag day; turn it on once the pack is clean.
+        type: boolean
+        default: false
+
+# Read-only. This job checks out two trees and runs one Python script; it publishes
+# nothing, comments nowhere, and needs no token beyond fetching them.
+permissions:
+  contents: read
+
+jobs:
+  conformance:
+    name: Pack conformance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the pack
+        uses: actions/checkout@v4
+        with:
+          path: pack
+
+      - name: Check out the framework (the checker's single home)
+        uses: actions/checkout@v4
+        with:
+          repository: meta-agentic/meta-os
+          ref: ${{ inputs.framework-ref }}
+          path: framework
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      # Pinned for the same reason the framework's own workflow pins them: a gate that
+      # changes behaviour when a transitive release lands is not a gate. jsonschema is
+      # held at 3.2.0 because validate_pack.py selects its validator class explicitly
+      # and guards the draft-07 fallback.
+      - name: Install validator dependencies
+        run: |
+          python -m pip install --disable-pip-version-check --quiet \
+            "pyyaml==6.0.2" "jsonschema==3.2.0"
+
+      # Inputs reach the shell through the environment, never through `${{ }}`
+      # interpolation into the script body: a caller-supplied path must not be able to
+      # become a command in this job.
+      - name: Pack conformance gate
+        env:
+          PACK_PATH: ${{ inputs.pack-path }}
+          STRICT: ${{ inputs.strict }}
+        run: |
+          set -euo pipefail
+          args=""
+          if [ "${STRICT}" = "true" ]; then args="--strict"; fi
+          python framework/scripts/validate_pack.py ${args} "pack/${PACK_PATH}"
+
+      - name: Record the result in the run summary
+        if: always()
+        env:
+          PACK_PATH: ${{ inputs.pack-path }}
+          FRAMEWORK_REF: ${{ inputs.framework-ref }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Pack conformance gate"
+            echo
+            echo "- pack: \`${PACK_PATH}\`"
+            echo "- contract: \`systems/pack.schema.json\` at meta-os \`${FRAMEWORK_REF}\`"
+            echo "- checker: \`scripts/validate_pack.py\` (single home — never a local copy)"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -25,5 +25,16 @@ agentdb.rvf*
 
 # Machine-local Claude Code config (dev-server launch configs carry absolute paths)
 .claude/
+
+# Agent memory store (local, per-machine). Binary SQLite plus its WAL
+# sidecars cannot be shared between clones, and concurrent sessions conflict
+# on every write.
+ruvector.db
+**/ruvector.db
+*.db-wal
+*.db-shm
+
+# Python caches
 __pycache__/
 *.pyc
+

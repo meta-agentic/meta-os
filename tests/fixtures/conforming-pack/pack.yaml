@@ -1,0 +1,18 @@
+# Fixture: a pack that satisfies every rule scripts/validate_pack.py enforces.
+# Kept minimal but REAL — it is the positive control for the conformance gate,
+# so anything that would not pass review in a published pack does not belong here.
+version: 1
+name: example-discipline
+description: "Example discipline (1 skill): a rigor spine plus one branch discipline, each emitting a checkable ledger."
+provenance: first-party
+license: MIT
+
+config:
+  profile:
+    default: strict
+    one_of: strict | light
+    doc: "Which rigor bundle the skills apply. strict demands evidence for every claim; light records the same ledger advisory-only."
+
+profiles:
+  strict: profiles/strict.md
+  light: profiles/light.md

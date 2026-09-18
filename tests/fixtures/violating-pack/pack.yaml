@@ -1,0 +1,9 @@
+# Fixture: a pack that FAILS the conformance gate, on purpose.
+# Its violations are enumerated in tests/fixtures/_index.md and asserted one by one in
+# tests/test_validate_pack.py. Fixing one here without updating that test is what makes
+# the gate stop proving anything, so treat this file as a test input, not as debt.
+version: 1
+name: example-nonconforming
+description: "Too short."
+provenance: first-party
+license: MIT

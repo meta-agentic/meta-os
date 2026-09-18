@@ -1,0 +1,4 @@
+# Copy this block into your instance's .packs.yaml under packs: example-nonconforming: config:
+packs:
+  example-nonconforming:
+    config: {}

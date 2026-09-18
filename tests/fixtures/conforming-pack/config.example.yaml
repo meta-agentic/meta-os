@@ -1,0 +1,5 @@
+# Copy this block into your instance's .packs.yaml under packs: example-discipline: config:
+packs:
+  example-discipline:
+    config:
+      profile: strict      # strict | light

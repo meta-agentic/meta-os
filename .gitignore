@@ -34,7 +34,9 @@ ruvector.db
 *.db-wal
 *.db-shm
 
-# Python caches
+# Python caches — the gates in scripts/ import each other and the suites in
+# tests/ and pipeline/tests/ run them, so both grow bytecode that is build
+# output, not content.
 __pycache__/
 *.pyc
 

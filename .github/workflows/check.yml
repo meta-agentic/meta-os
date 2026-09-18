@@ -7,9 +7,16 @@
 #
 # Two jobs on purpose:
 #   gates   — the baseline ratchet. Blocks. Fails only on debt a change INTRODUCED.
+#             Also runs the pack gate's own fixture self-test, so a change that
+#             weakens the pack contract reddens the build instead of passing quietly.
 #   debt    — the same gates under `--strict`. Never blocks; publishes the true,
 #             un-baselined debt to the run summary so paying it down stays a visible
 #             decision rather than a forgotten one.
+#
+# The pack gate here only ever sees packs that live INSIDE meta-os. A pack in its own
+# repository adopts the same checker by calling the reusable workflow next door,
+# .github/workflows/pack-conformance.yml — so a sibling pack's drift reddens a build
+# too, which it previously could not.
 #
 # Deliberately unqualified `push:` and `pull_request:` triggers, per the brief. That
 # means a PR branch in this repo runs twice (once for the branch ref, once for the
@@ -64,30 +71,24 @@ jobs:
       - name: Framework self-check
         run: python scripts/validate_framework.py
 
-      # scripts/validate_pack.py is on `main`, but a ref cut before it landed will
-      # not carry it. Two wrong answers here: hard-failing on a ref that
-      # legitimately does not carry it, and `|| true`-ing it into silence. So
-      # absence is REPORTED — a warning annotation on the run plus a line in the
-      # job summary — and presence is enforced with the script's own exit code.
-      # A ref that carries the script is gated with no edit to this file.
-      - name: Pack conformance gate
-        env:
-          REF_NAME: ${{ github.ref_name }}
+      # Unconditional: the checker is part of this repo's contract, not an optional
+      # extra. It sweeps the packs that live INSIDE meta-os (today, the authoring
+      # skeleton); packs in their own repositories run the same script through
+      # .github/workflows/pack-conformance.yml, which they call from a one-file
+      # caller workflow. Same checker, one home, two entry points.
+      - name: Pack conformance gate (in-repo packs)
         run: |
           set -euo pipefail
-          if [ -f scripts/validate_pack.py ]; then
-            python scripts/validate_pack.py
-            echo "### Pack conformance gate: enforced" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "::warning title=Pack conformance gate did not run::scripts/validate_pack.py is not present on this ref. Pack conformance was NOT checked in this run."
-            {
-              echo "### Pack conformance gate: NOT RUN"
-              echo
-              echo "\`scripts/validate_pack.py\` is absent on \`${REF_NAME}\`, so the pack"
-              echo "conformance contract was **not** checked in this run. The script is on"
-              echo "\`main\` — rebase this ref onto it and the step gates automatically."
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
+          python scripts/validate_pack.py
+          echo "### Pack conformance gate: enforced" >> "$GITHUB_STEP_SUMMARY"
+
+      # The gate's own tests. A conformance checker nobody exercises decays into a
+      # script that exits 0, so the fixture packs in tests/fixtures/ — one conforming,
+      # one deliberately violating — are driven through the real command line here.
+      # This step is what makes "a pack with a violation fails a required check"
+      # a fact about this repository rather than a claim in a review comment.
+      - name: Pack conformance gate — fixture self-test
+        run: python -m unittest discover -s tests -v
 
   debt:
     name: True debt (--strict, advisory)
@@ -119,12 +120,7 @@ jobs:
         continue-on-error: true
         run: |
           set -o pipefail
-          if [ -f scripts/validate_pack.py ]; then
-            python scripts/validate_pack.py --strict 2>&1 | tee pack-strict.txt
-          else
-            echo "scripts/validate_pack.py is not present on this ref — not checked." \
-              | tee pack-strict.txt
-          fi
+          python scripts/validate_pack.py --strict 2>&1 | tee pack-strict.txt
 
       - name: Publish the debt to the run summary
         if: always()

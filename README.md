@@ -1,10 +1,12 @@
 # meta-os — Agentic OS framework
 
 The **generic framework** of an Agentic OS built on Claude Code + Obsidian: a skill
-backbone, an operating model for agent coordination, memory conventions, and note
-templates — with **no instance data**. Your private *instance* repo (project registry,
-live memory, automations, vault federation) mounts these folders by symlink and is the
-vault you actually open.
+backbone, an operating model for agent coordination, memory conventions, note templates,
+and the template a fresh instance starts from — with **no instance data**. Your private
+*instance* (project registry, live memory, automations, vault federation) is a clone of
+this repository: one `git clone`, one `scripts/bootstrap.sh`, and the vault you open is
+live. The framework updates in place with `scripts/upgrade.sh`; your files are never
+touched.
 
 > Design principle: **skill backbone, not dashboard.** The value is in codified skills and
 > organized memory. The dashboard is the last 10% — built only once the backbone is solid.
@@ -58,39 +60,68 @@ coordination patterns), [`templates/`](templates/).
 - **Python 3** — optional; only used by the [`graphify`](skills/graphify/) skill, which
   self-installs its one dependency (`pip install graphifyy`) the first time it runs.
   Nothing to install up front.
-- **git** (+ [`gh`](https://cli.github.com/), optional) — to clone your instance below.
+- **git** — to clone the framework; `scripts/bootstrap.sh` and `scripts/upgrade.sh` are
+  plain bash over git, nothing else to install.
 
 ## Setting up an instance
 
-You don't clone this repo directly — you create a **private instance** from
-[meta-os-instance-template](https://github.com/meta-agentic/meta-os-instance-template) and the
-framework comes with it as the `.meta-os` git submodule. **One clone and you're
-running:**
+**Clone, bootstrap, open.** The clone *is* your instance:
 
 ```bash
-# 1. create your private instance from the template
-gh repo create <you>/<instance-name> --template meta-agentic/meta-os-instance-template --private
-
-# 2. clone it — the framework lands in .meta-os/ at a pinned version, mounts pre-wired
-git clone --recursive git@github.com:<you>/<instance-name>.git
-cd <instance-name>
+git clone https://github.com/meta-agentic/meta-os.git my-os && cd my-os
+scripts/bootstrap.sh              # asks for a name, your private remote, packs, the dashboard
 ```
 
-That's the default (**single-clone**) mode. Framework developers can instead point the
-mounts at a sibling `../meta-os` checkout — see [`systems/distribution.md`](systems/distribution.md)
-for all consumption modes (single-clone, sibling, and the planned container image), and
-why the framework and instance stay separate repos.
+`bootstrap.sh` copies [`instance-template/root/`](instance-template/_index.md) to the
+repository root — your `_index.md`, `projects/`, `memory/`, `automations/`, `vaults/`,
+`meta-os.config.json`, and the instance contract `.claude/CLAUDE.md` — fills in your
+instance name, turns the clone's `origin` into a **fetch-only `upstream`** (the framework
+is pulled from, never pushed to), mounts the packs you chose and builds the engine's
+discovery links. Headless installs pass every answer as a flag:
+
+```bash
+scripts/bootstrap.sh --yes --name acme-os --origin git@github.com:acme/acme-os.git \
+                     --packs agile --dashboard --commit
+```
 
 Then:
 
-1. Open `<instance-name>/` as your Obsidian vault — wikilinks resolve across the
-   framework mount since they're vault-root-relative (`.meta-os/` stays out of the graph).
-2. Rename `{{instance-name}}` and fill in `CLAUDE.md` / `_index.md` with your instance facts.
-3. In Claude Code, run the [`bootstrap-instance`](skills/bootstrap-instance/SKILL.md)
-   skill — a one-time onboarding conversation that decides your backlog/tracking model
-   (none / local JSON / Jira-integrated), offers **skill packs** to mount
-   ([`systems/packs.md`](systems/packs.md)), registers your first project, and optionally
-   wires up its GitHub repo.
+1. **Push to your private remote** — `git push -u origin main`. Keep that repository
+   private: it is where your estate's data lives. (A repository created with GitHub's
+   *Use this template* works too; the first upgrade knows how to merge it.)
+2. **Open the folder as your Obsidian vault** — wikilinks resolve because the framework's
+   folders and yours are one tree. Start at `_index.md`.
+3. **In Claude Code, run the [`bootstrap-instance`](skills/bootstrap-instance/SKILL.md)
+   skill** — the one-time onboarding conversation: backlog/tracking model, first project,
+   GitHub wiring, which packs to mount ([`systems/packs.md`](systems/packs.md)).
+
+### Updating the framework
+
+```bash
+scripts/upgrade.sh --check        # how far behind you are; changes nothing
+scripts/upgrade.sh                # merge the framework's main, re-sync the links
+```
+
+An upgrade can only change framework paths, because the framework never tracks an
+instance path and the gate in `scripts/validate_framework.py` refuses it if it ever
+would. Your side of the bargain: never edit a framework path in your instance —
+`upgrade.sh` checks and refuses to merge while one is modified (`--force` to carry the
+edit and resolve the result yourself). A change to `instance-template/` after you
+bootstrapped is reported as a diff, never re-applied over your files. The whole
+arrangement, and why the framework used to be a separate repository, is in
+[`systems/distribution.md`](systems/distribution.md).
+
+### Repository map
+
+| Path | Owner | What |
+|------|-------|------|
+| `CLAUDE.md` | framework | The framework contract, loaded in every session; the instance contract is `.claude/CLAUDE.md`, loaded beside it |
+| [`skills/`](skills/_index.md) | framework | The skill library — Layer 1 backbone; pack skills are linked in beside these |
+| [`systems/`](systems/_index.md) | framework | How the OS operates — operating model, memory, config, packs, distribution |
+| [`templates/`](templates/_index.md) · [`agents/`](agents/_index.md) · [`hooks/`](hooks/_index.md) · [`pipeline/`](pipeline/_index.md) | framework | Note templates · roster + patterns · harness event scripts (shipped, never auto-wired) · the autonomous swarm loop |
+| [`scripts/`](scripts/_index.md) · [`tests/`](tests/_index.md) | framework | `bootstrap.sh` · `upgrade.sh` · `packs.sh` · the self-check and pack gates, and what proves they gate |
+| [`instance-template/`](instance-template/_index.md) | framework | `root/` is what first run instantiates; never edited in an instance |
+| `_index.md` · `projects/` · `memory/` · `automations/` · `vaults/` · `meta-os.config.json` · `.packs.yaml` · `.claude/` | **instance** | Yours from first run on; absent in the framework repository by rule |
 
 ## Memory topologies
 
@@ -242,4 +273,5 @@ MIT ([LICENSE](LICENSE)). The skill library includes MIT-licensed content from
 ## Status
 
 Framework v0 — skill library (6 skills), operating-model docs, memory conventions,
-templates. Extracted from a working single-vault scaffold.
+templates, and the instance template folded in as `instance-template/` (it was a separate
+repository until the one-repository layout). Extracted from a working single-vault scaffold.

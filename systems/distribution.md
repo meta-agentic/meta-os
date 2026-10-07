@@ -2,60 +2,125 @@
 type: system
 tags: [os, system, distribution]
 ---
-# Distribution — how an instance consumes the framework
+# Distribution — one repository, two owners
 
-Community feedback on the two-repo model: sibling checkouts + symlinks confuse adopters
-who want to *clone one thing and go*; it's unclear where a project's deliverables land;
-and a containerized install was requested. This note is the standing answer: the
-consumption modes, why the framework/instance **separation stays** in all of them, and
-the container layout.
+An instance of the OS **is a clone of this repository**. The framework and the instance
+share one git history and own **disjoint paths**: the framework's folders arrive and
+update by merge, the instance's folders are instantiated once on first run and never
+touched by the framework again. Setting up is one clone and one script; updating is one
+script. This note is the standing answer to how an instance consumes the framework, why
+the separation that used to be two repositories now runs *inside* one, and what each
+side may and may not do.
 
 ## The invariant
 
-The privacy boundary is structural, not procedural: framework (public-safe) and instance
-(private) are **different git histories**. That survives every mode below. What varies is
-only *how the framework arrives on disk*.
+The privacy boundary is structural, not procedural. It used to be "two git histories";
+it is now **two path sets with one owner each, enforced by a gate**:
 
-## Modes
+| Owner | Paths | Who writes | How it changes |
+|-------|-------|-----------|----------------|
+| **Framework** (public) | `CLAUDE.md` · `README.md` · `LICENSE` · `PROVENANCE.md` · `SECURITY.md` · `skills/` · `systems/` · `templates/` · `agents/` · `hooks/` · `pipeline/` · `scripts/` · `tests/` · `instance-template/` · `.github/` · `.githooks/` · `.gitignore` | upstream, by pull request in a public checkout | `scripts/upgrade.sh` merges the framework's `main` |
+| **Instance** (private) | everything `instance-template/root/` carries, at the same paths: `.claude/CLAUDE.md` · `_index.md` · `projects/` · `memory/` · `automations/` · `vaults/` · `meta-os.config.json` · `.packs.yaml` · `.obsidian/` — plus the pack mounts `.packs/` and `.gitmodules` | the instance, directly | never by the framework |
 
-| Mode | Get it | Update it | For |
-|------|--------|-----------|-----|
-| **1 · Single clone (submodule)** — default for adopters | `git clone --recursive <your-instance>` (created from the instance template; the framework is the `.meta-os` submodule inside it) | `git submodule update --remote .meta-os`, commit the pin — a deliberate, reviewable version bump | Users who want one repo that just works |
-| **2 · Sibling checkouts** — developer mode | clone framework and instance side by side; per-folder symlinks (`skills → ../meta-os/skills`) | `git pull` in `meta-os/` | Anyone hacking the framework itself while running an instance |
-| **3 · Container** | `docker compose up` — image ships framework + engine + dashboard at a pinned tag | pull a newer image tag; volumes untouched | Zero-setup / server installs (layout below) |
+Two rules keep the sets disjoint, and both are checked by a program rather than by care:
 
-In modes 1 and 2 the instance's mount folders are the same four symlinks; only the
-target differs (`.meta-os/skills` vs `../meta-os/skills`), and the template's
-`scripts/framework-mode.sh` flips between them. Vault-root-relative wikilinks resolve
-identically, so notes never know which mode they're in. The submodule deliberately
-lives at a **dot-path** (`.meta-os`): Obsidian ignores dot-folders, so framework notes
-enter the vault graph once — through the mounts — instead of twice.
+1. **The framework never tracks an instance path.** `scripts/validate_framework.py`
+   derives the instance paths from `instance-template/root/` and fails — never as
+   tolerated debt — on any tracked file at one of them. So a framework merge cannot
+   carry a change to an instance file, because no framework commit contains one.
+2. **An instance never edits a framework path.** `scripts/upgrade.sh` lists the
+   framework paths the instance modified or deleted since the merge base and refuses
+   to merge while there are any (`--force` to carry them and resolve the result
+   yourself). Adding a path anywhere is fine — the instance's own skill in `skills/`,
+   its own note type in `systems/`; only the framework's files are off limits.
 
-Mode 1 is implemented in the instance template (submodule + mounts + mode script);
-mode 3 is designed below, not yet built.
+What the instance contract and the framework contract are is unchanged: the root
+`CLAUDE.md` is the framework's (what the OS *is*), `.claude/CLAUDE.md` is the
+instance's (what *this estate* is). Claude Code loads both as project instructions, so
+no composition step and no symlink stands between a framework rule and the session
+that must follow it.
 
-## Why not one merged repo
+## First run
 
-The obvious ask — "let me clone `meta-os` and customize it in place, with updates that
-skip my folders" — was evaluated and rejected:
+```bash
+git clone https://github.com/meta-agentic/meta-os.git my-os && cd my-os
+scripts/bootstrap.sh            # interactive on a terminal; --yes takes every default
+```
 
-- **Updates would conflict exactly where users customize.** The framework tracks
-  `memory/` skeleton indexes, `CLAUDE.md`, `_index.md`; a merged repo means every
-  upstream pull fights the user's edits to those same paths. The submodule pin gives
-  "update without overwriting my folders" *for free* — framework files aren't in the
-  instance's history at all.
-- **Root contracts collide.** Framework and instance each need their own `CLAUDE.md` /
-  `_index.md` (the generic contract vs. *your* estate and authority order). One repo
-  can only have one of each.
-- **Privacy inverts.** A public-repo fork can never be made private on GitHub, and a
-  private vault whose history *contains* the public repo is one wrong `git push
-  --set-upstream` away from leaking memory. Two histories make the leak structurally
-  impossible.
-- **Contributing back gets harder,** not easier: framework fixes would need
-  path-filtered cherry-picks out of a private history instead of a normal PR from a
-  `meta-os` checkout.
+`scripts/bootstrap.sh` does five things, each idempotent and each reported:
 
-What the feedback actually asks for — one clone, protected customization — is mode 1.
+1. **Instantiates** `instance-template/root/` at the repository root — path for path,
+   only where the path does not exist yet — and fills the placeholders
+   (`{{instance-name}}`, `{{bootstrapped}}`, `{{template-ref}}`) in the copies.
+   [[instance-template/_index|instance-template/]] documents the payload.
+2. **Points the remotes the right way round.** The clone's `origin` is the public
+   framework, so it becomes `upstream` with its push URL set to `no_push`: the
+   framework is fetched, never pushed to, and a wrong `git push` fails instead of
+   leaking an estate. Your private remote is added as `origin` (`--origin <url>`, or
+   later by hand).
+3. **Mounts packs** (`--packs agile,…` from [[systems/packs.yaml|the registry]]) and
+   **builds the discovery links**: pack skills linked into `skills/` beside the
+   framework's own, the whole of `skills/` mirrored into `.claude/skills/`. Generated,
+   never committed — `scripts/packs.sh sync` lists its links in `.git/info/exclude`,
+   the framework's `.gitignore` covers `.claude/{skills,agents,hooks}/`.
+4. **Installs the dashboard** if asked (`--dashboard [dir]`): clones
+   [meta-os-dashboard](https://github.com/meta-agentic/meta-os-dashboard) next to the
+   repository and writes its `instance.config.json` pointing here — the app keeps its
+   own repository and lifecycle (Node dependencies, build, CI), the instance just
+   gets it wired on first run.
+5. **Commits** (`--commit`) or tells you the command.
+
+Headless installs pass every answer as a flag (`--yes --name acme --packs agile
+--origin git@…`); `--dry-run` prints the plan and writes nothing. The guided first
+conversation — backlog model, first project, GitHub wiring — stays with the
+[[skills/bootstrap-instance/SKILL|bootstrap-instance]] skill, which calls this script
+for the mechanical part.
+
+## Updating
+
+```bash
+scripts/upgrade.sh --check      # how far behind, integrity, template drift — changes nothing
+scripts/upgrade.sh              # fetch upstream, verify, merge, re-sync the links
+```
+
+The merge touches framework paths only (rule 1). After it, `scripts/packs.sh sync`
+rebuilds the links so a skill the framework added is discoverable at once, and the
+framework's own gate runs scoped to the framework's paths.
+
+**The template is reported, not re-applied.** An instance's `_index.md`, `projects/`,
+`automations/` are its own from the moment they were instantiated; a later change to
+`instance-template/root/` is shown as a diff since the `template` ref recorded in
+`meta-os.config.json`, for the operator to apply by hand or ignore, then
+`--ack-template` records the reviewed ref. A change that must reach *running*
+instances is framework mechanism and belongs in `skills/`, `systems/`, `scripts/` or
+`hooks/` — never in the template.
+
+**A repository created from a template snapshot** (GitHub's *Use this template*, or a
+copied tree) has no history in common with the framework. The first upgrade merges
+with `--allow-unrelated-histories`; every conflict it can meet is a framework path the
+framework itself changed since the snapshot (rule 2 was checked first), so each is
+resolved to the framework's version. From then on there is a merge base and upgrades
+are ordinary merges.
+
+## Why one repository — and what changed since it was rejected
+
+An earlier version of this note rejected the merged repository on four grounds. Each
+was an argument against *a live merge of unowned paths*; the ownership rules above
+remove the premise:
+
+| Objection then | Answer now |
+|---|---|
+| Updates conflict exactly where users customise — the framework tracked `memory/`, `CLAUDE.md`, `_index.md` | The framework tracks **no** instance path (rule 1, gate-enforced) and the instance edits **no** framework path (rule 2, refused on upgrade). A merge cannot collide with a file only one side has ever committed. |
+| Root contracts collide — one repository has one `CLAUDE.md`, one `_index.md` | The engine loads two project-instruction files, `CLAUDE.md` and `.claude/CLAUDE.md`; the framework owns the first, the instance the second. The framework ships no `_index.md` at the root: the vault home is instantiated. |
+| Privacy inverts — a fork can never be made private; a private history containing the public one is one wrong push from a leak | An instance is a clone or a template snapshot, never a GitHub fork, so it is private from its first commit. The framework remote is fetch-only by construction (`no_push`), and the public repository's own gate rejects instance identifiers in anything it tracks. |
+| Contributing back needs path-filtered cherry-picks out of a private history | A framework change is made in a public checkout and proposed upstream, as for any open-source dependency; the instance takes it with the next upgrade. An edit that landed in an instance by mistake is a `git diff upstream/main -- <framework paths>` away from a patch. |
+
+What the rejection protected — the public framework must never carry an estate's
+data — survives intact; it is now enforced by the gate on every commit rather than by
+the accident of two repositories. What it cost — a template repository that drifted
+from the framework it scaffolded, a `packs.sh` vendored per instance and fixed in one
+place at a time, a submodule most adopters cloned without `--recursive`, a mode script
+to flip four symlinks — is gone with the second repository.
 
 ## Where deliverables land (per project)
 
@@ -69,28 +134,26 @@ surface it so the answer to "where does this project deliver?" is always one gla
 away. `output:` names the *destination*, not a promise — an empty referenced repo is
 fine; it fills as the project ships.
 
-## Container layout (mode 3)
+## Container
 
-The split maps 1:1 onto image vs. volumes — the image is the framework, volumes are the
-instance:
+A container install is the same layout with the engine and the dashboard baked into
+an image and the instance — this repository, framework paths included — on a volume:
 
 ```
 image (versioned, disposable)          volumes (private, persistent)
-├── meta-os @ pinned tag               ├── /vault     ← the instance repo: CLAUDE.md,
-├── engine (claude CLI)                │               projects/, memory/, automations/,
-├── meta-os-dashboard (built)          │               instance.config.json
-└── entrypoint: wire symlinks,         ├── /projects  ← estate working repos (graphify
-    start dashboard + heartbeat        │               output, backlog mirrors live here)
-                                       └── /engine    ← engine home (credentials,
-                                                       session logs — feeds the usage widget)
+├── engine (claude CLI)                ├── /instance  ← your clone of this repository:
+├── meta-os-dashboard (built)          │               framework + instance paths,
+└── entrypoint: scripts/bootstrap.sh   │               upgraded with scripts/upgrade.sh
+    --yes on an empty volume,          ├── /projects  ← estate working repos
+    scripts/packs.sh apply every boot  └── /engine    ← engine home (credentials, logs)
 ```
 
-- Upgrade = pull a newer image; both private volumes are untouched — the container
-  answer to "updates must not overwrite my customization".
-- `/vault` stays a git repo the user pushes to their own private remote; the container
-  adds no second source of truth.
-- The dashboard's `instance.config.json` lives in `/vault` and points at
-  `/vault` + `/projects/...` paths, so one config survives image upgrades.
+- Upgrading the framework is `scripts/upgrade.sh` inside the volume; upgrading the
+  engine or the dashboard is a newer image tag. Neither touches the other.
+- `/instance` stays a git repository the operator pushes to their own private remote;
+  the container adds no second source of truth.
+- The dashboard's `instance.config.json` points at `/instance` for both
+  `instanceRoot` and `frameworkRoot` — one path, because they are one checkout.
 
 Status: layout agreed here; `Dockerfile` + `compose.yml` land in the dashboard repo
 (app lifecycle) once built and verified — this note then links to them.

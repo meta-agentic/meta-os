@@ -1,0 +1,64 @@
+{
+  "$schema": "./systems/meta-os.config.schema.json",
+  "_README": [
+    "INSTANCE ESTATE CONFIG — your estate's knowledge, private to this repository.",
+    "",
+    "This is the middle of three levels (see systems/config.md):",
+    "  framework  — systems/meta-os.config.schema.json : valid keys + defaults, ZERO values, public",
+    "  instance   — THIS FILE, at the repository root beside .claude/CLAUDE.md : estate knowledge, private",
+    "  deployment — the dashboard's instance.config.json : where the instance is, auth, CORS, dataDir",
+    "",
+    "Keeping estate knowledge here (not in the dashboard's config) is what lets a skill or",
+    "a sync script read your estate with the dashboard uninstalled.",
+    "",
+    "Every key but `instance` is OPTIONAL. Delete the rest and you get default behaviour:",
+    "this repository's own memory/{raw,wiki,output} as the sole canon root, plus vaults/* as",
+    "federated mounts. Nothing here is required to start.",
+    "",
+    "Replace the ${...} placeholders below with your own paths, or delete what you don't use.",
+    "A deployment may override any of these keys; this file supplies the defaults.",
+    "",
+    "Keys:",
+    "  instance   — written by scripts/bootstrap.sh: this instance's name, the date it was",
+    "               instantiated, and the framework commit whose instance-template/ was copied",
+    "               in. scripts/upgrade.sh diffs the template from that commit to report what",
+    "               changed since; your instantiated copies are yours and are never rewritten.",
+    "  vars       — reusable prefixes: ${name} expands in any value here and in a projects/*.md",
+    "               'path:', so moving your checkout is a one-line change.",
+    "  backlogs   — one entry per space you track; 'path' is the space directory of a per-item",
+    "               backlog, or a legacy backlog.json.",
+    "  memory     — OMIT the whole block for the default topology. 'roots' ARE the",
+    "               raw->wiki->output pipeline (layout: flat | tier/project | project/tier);",
+    "               'federated' mounts are navigation only, never canon; a dangling path is",
+    "               skipped and reported, never fatal."
+  ],
+  "instance": {
+    "name": "{{instance-name}}",
+    "bootstrapped": "{{bootstrapped}}",
+    "template": "{{template-ref}}"
+  },
+  "vars": {
+    "estate": "${HOME}/code/your-org"
+  },
+  "backlogs": [
+    {
+      "space": "abc",
+      "path": "${estate}/vault/abc"
+    }
+  ],
+  "memory": {
+    "roots": [
+      {
+        "label": "instance",
+        "path": "${estate}/your-instance/memory",
+        "layout": "flat"
+      }
+    ],
+    "federated": [
+      {
+        "label": "some-project",
+        "path": "${estate}/some-project/docs"
+      }
+    ]
+  }
+}

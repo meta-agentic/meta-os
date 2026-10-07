@@ -1,0 +1,4 @@
+# Desired packs — reconciled by scripts/packs.sh apply (see the framework's
+# systems/packs.md). add/remove maintain this file; headless installs (container,
+# CI) write it and run apply.
+packs:

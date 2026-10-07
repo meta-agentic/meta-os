@@ -14,7 +14,7 @@ are unmistakable wherever they sit.
 | Level | File | Holds | Owner · visibility |
 |-------|------|-------|--------------------|
 | **Framework** | [`systems/meta-os.config.schema.json`](meta-os.config.schema.json) (+ this doc) | Valid keys, valid enum values (e.g. `layout ∈ flat \| tier/project \| project/tier`), defaults, fallback behaviour. **Zero values.** | meta-os · **public** |
-| **Instance estate** | `meta-os.config.json` (at the instance root, beside `CLAUDE.md`/`_index.md`) | Estate knowledge: `memory` topology, `backlogs[]`, estate `vars`. | the adopter · **private** |
+| **Instance estate** | `meta-os.config.json` (at the repository root, beside `_index.md`; instantiated from `instance-template/root/` on first run) | Estate knowledge: `memory` topology, `backlogs[]`, estate `vars` — plus the `instance` record `scripts/bootstrap.sh` writes (name, date, template ref). | the adopter · **private** |
 | **Deployment** | `instance.config.json` (the dashboard) | Bootstrap pointer (`instanceRoot`/`frameworkRoot`/`github.*`), `auth`, `corsOrigins`, `claudeHome`, `dataDir`. | per-deploy · **secret** |
 
 **Why the split.** A framework-level concept like the memory topology must be readable
@@ -34,6 +34,7 @@ optional; the file may be omitted entirely (defaults apply). Shape:
 
 ```jsonc
 {
+  "instance": { "name": "…", "bootstrapped": "YYYY-MM-DD", "template": "<sha>" },  // written at bootstrap
   "vars": { "code": "…" },                         // reusable ${} prefixes
   "backlogs": [ { "space": "…", "path": "…" } ],   // backlog mirrors (per-item dir or legacy json)
   "memory": {                                       // configurable topology (omit → default)
@@ -46,6 +47,11 @@ optional; the file may be omitted entirely (defaults apply). Shape:
 }
 ```
 
+- **`instance`** — the instantiation record: `name`, the `bootstrapped` date, and the
+  `template` ref (the framework commit whose `instance-template/` was copied in).
+  `scripts/upgrade.sh` diffs the template from that ref to report what changed since;
+  `--ack-template` moves it forward once the diff has been reviewed. The one key the
+  framework writes rather than the adopter; see [[systems/distribution]].
 - **`vars`** — `${name}` expands in any config value (and in `projects/*.md` `path:`), so a
   repo-root move is a one-line change.
 - **`backlogs[]`** — the backlog mirrors this instance tracks; `path` resolves to a per-item
@@ -92,4 +98,4 @@ present**. The migration is simply: move `vars` / `backlogs` / `memory` out of
 `instance.config.json` into `meta-os.config.json`, and leave the deployment keys behind.
 
 See [[systems/memory-layer]] for the topology semantics and [[systems/distribution]] for how
-an instance mounts the framework.
+an instance and the framework share one repository.

@@ -82,12 +82,15 @@ jobs:
           python scripts/validate_pack.py
           echo "### Pack conformance gate: enforced" >> "$GITHUB_STEP_SUMMARY"
 
-      # The gate's own tests. A conformance checker nobody exercises decays into a
-      # script that exits 0, so the fixture packs in tests/fixtures/ — one conforming,
-      # one deliberately violating — are driven through the real command line here.
-      # This step is what makes "a pack with a violation fails a required check"
-      # a fact about this repository rather than a claim in a review comment.
-      - name: Pack conformance gate — fixture self-test
+      # The gates' and the lifecycle's own tests. A conformance checker nobody
+      # exercises decays into a script that exits 0, so the fixture packs in
+      # tests/fixtures/ — one conforming, one deliberately violating — are driven
+      # through the real command line here; and the one-repository promise (an
+      # upgrade changes framework paths and no instance path) is driven end to end
+      # through scripts/bootstrap.sh and scripts/upgrade.sh in throwaway clones of
+      # this very tree. This step is what makes both facts about this repository
+      # rather than claims in a review comment.
+      - name: Gate self-tests and instance lifecycle (bootstrap → upgrade)
         run: python -m unittest discover -s tests -v
 
   debt:

@@ -23,8 +23,23 @@
 .swarm/
 agentdb.rvf*
 
-# Machine-local Claude Code config (dev-server launch configs carry absolute paths)
-.claude/
+# Claude Code project surface — INSTANCE-owned in the one-repository layout
+# (systems/distribution.md; the old wholesale ignore was narrowed on purpose). The
+# framework tracks nothing under .claude/ and its gate refuses to. An instance commits
+# its contract (.claude/CLAUDE.md, instantiated by scripts/bootstrap.sh) and its
+# settings.json; the discovery links scripts/packs.sh sync generates under
+# .claude/{skills,agents,hooks}/ and every machine-local file stay out.
+.claude/*
+!.claude/CLAUDE.md
+!.claude/settings.json
+
+# Instance operational data — machine-local, never canon (the instance template's rules)
+automations/runs.jsonl
+instance.config.json
+
+# The pack links scripts/packs.sh sync places in skills/ beside the framework's own skill
+# folders are generated too; sync lists them in $GIT_DIR/info/exclude per clone, since a
+# .gitignore rule cannot tell a generated link from a framework folder of the same shape.
 
 # Agent memory store (local, per-machine). Binary SQLite plus its WAL
 # sidecars cannot be shared between clones, and concurrent sessions conflict

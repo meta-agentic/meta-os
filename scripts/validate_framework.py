@@ -26,8 +26,18 @@ the whole gate on day one would just get the hook disabled, so:
 
 That makes the baseline a ratchet: existing debt is tolerated, new debt is not,
 and debt that gets paid off can never quietly come back (removing its baseline
-line is a reviewable diff). One class opts out of the ratchet entirely — see
+line is a reviewable diff). Two classes opt out of the ratchet entirely — see
 `BASELINEABLE` below.
+
+One repository, two owners
+--------------------------
+Since the instance template was folded in (`systems/distribution.md`), a
+checkout is either the framework itself or a bootstrapped *instance* of it —
+the same repository, with the instance's files added at paths the framework
+never tracks. This gate therefore scopes itself to the framework's own paths
+and refuses, in the framework, any tracked file at an instance path. The
+instance paths are not a hand-kept list: they are read from
+`instance-template/root/`, the payload `scripts/bootstrap.sh` instantiates.
 """
 from __future__ import annotations
 
@@ -52,6 +62,37 @@ BASELINE = ROOT / "scripts" / "framework-baseline.txt"
 
 INDEX_NAME = "_index.md"
 SKILL_NAME = "SKILL.md"
+
+# ---------------------------------------------------------------------------
+# Instance paths — derived, not declared. Every top-level entry of the instance
+# template's payload lands at the same path under the repository root when an
+# instance is bootstrapped, and from then on that path is the instance's. The
+# framework may not track one; the gate may not judge one. Two paths the payload
+# does not carry but the mount mechanism creates are added explicitly: the pack
+# mounts and the submodule manifest `git submodule add` writes.
+# ---------------------------------------------------------------------------
+INSTANCE_TEMPLATE_ROOT = ROOT / "instance-template" / "root"
+INSTANCE_ONLY_EXTRA = frozenset({".packs", ".gitmodules"})
+
+
+def instance_paths() -> frozenset[str]:
+    """Top-level names owned by an instance: the payload's entries plus the mounts."""
+    names = set(INSTANCE_ONLY_EXTRA)
+    if INSTANCE_TEMPLATE_ROOT.is_dir():
+        names.update(p.name for p in INSTANCE_TEMPLATE_ROOT.iterdir())
+    return frozenset(names)
+
+
+def is_instance_path(rel: Path) -> bool:
+    return bool(rel.parts) and rel.parts[0] in instance_paths()
+
+
+# A bootstrapped checkout carries the instance contract; the framework repository
+# never does. In instance mode the checks that cannot tell a framework skill from
+# the instance's own are narrowed to what the catalog declares (see
+# check_skill_registration) and the count assertion is skipped.
+def instance_mode() -> bool:
+    return (ROOT / ".claude" / "CLAUDE.md").is_file()
 
 # ---------------------------------------------------------------------------
 # The `_index.md` convention, and the one ambiguity in it — resolved here.
@@ -143,6 +184,9 @@ BASELINEABLE = {
     "folder-index": True,
     "count-assertion": True,
     "public-safety": False,
+    # The framework tracking an instance path is the one way an upgrade can collide
+    # with an instance's files. Structural, so never tolerated as debt.
+    "instance-path-tracked": False,
 }
 
 
@@ -179,10 +223,16 @@ class Finding:
 # --- discovery helpers -----------------------------------------------------
 
 def skill_dirs() -> list[Path]:
-    """Directories directly under skills/ that actually contain a SKILL.md."""
+    """Real directories directly under skills/ that actually contain a SKILL.md.
+
+    A symlink there is a pack skill `scripts/packs.sh sync` linked in beside the
+    framework's own (one-repository layout) — mounted, not authored here, so it
+    carries no provenance row and no catalog entry and is not a framework skill.
+    """
     if not SKILLS_DIR.is_dir():
         return []
-    return sorted(d for d in SKILLS_DIR.iterdir() if d.is_dir() and (d / SKILL_NAME).is_file())
+    return sorted(d for d in SKILLS_DIR.iterdir()
+                  if d.is_dir() and not d.is_symlink() and (d / SKILL_NAME).is_file())
 
 
 def provenance_skills() -> set[str]:
@@ -269,11 +319,25 @@ def tracked_files() -> list[Path]:
     try:
         out = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"],
                              capture_output=True, check=True).stdout
-        return [ROOT / n for n in out.decode("utf-8").split("\0") if n]
+        files = [ROOT / n for n in out.decode("utf-8").split("\0") if n]
     except (OSError, subprocess.CalledProcessError):
-        return [p for p in ROOT.rglob("*")
-                if p.is_file()
-                and not any(part.startswith(".") for part in p.relative_to(ROOT).parts[:-1])]
+        files = [p for p in ROOT.rglob("*")
+                 if p.is_file()
+                 and not any(part.startswith(".") for part in p.relative_to(ROOT).parts[:-1])]
+    # An instance's own files are not the framework's to scan (and in the framework
+    # repository the layout check below is what catches one being tracked at all).
+    return [p for p in files if not is_instance_path(p.relative_to(ROOT))]
+
+
+def tracked_instance_paths() -> list[str]:
+    """Tracked paths that sit at an instance path — must be empty in the framework."""
+    try:
+        out = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"],
+                             capture_output=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return []
+    return sorted(n for n in out.decode("utf-8").split("\0")
+                  if n and is_instance_path(Path(n)))
 
 
 def in_skill_subtree(d: Path) -> bool:
@@ -289,8 +353,25 @@ def in_skill_subtree(d: Path) -> bool:
 # --- checks ----------------------------------------------------------------
 
 def check_skill_registration(findings: list[Finding]) -> None:
-    """1. Every skill on disk has a provenance row AND a catalog entry."""
+    """1. Every skill on disk has a provenance row AND a catalog entry.
+
+    In an instance, a real directory under skills/ may be the instance's own skill
+    (allowed — see systems/packs.md), which has no business in the framework's
+    provenance table. There the check runs over the catalogued framework skills
+    instead: each still needs its provenance row, and index-phantom (below) still
+    demands each resolves on disk. What is dropped is only "on disk but not
+    catalogued", the one question that cannot be answered without knowing who
+    owns the directory.
+    """
     have_provenance, have_index = provenance_skills(), index_entries()
+    if instance_mode():
+        on_disk = {d.name for d in skill_dirs()}
+        for name in sorted(have_index & on_disk):
+            if name not in have_provenance:
+                findings.append(Finding(
+                    "skill-provenance", "PROVENANCE.md",
+                    f"skill {name!r} is catalogued but has no row in the provenance table"))
+        return
     for d in skill_dirs():
         if d.name not in have_provenance:
             findings.append(Finding(
@@ -350,6 +431,8 @@ def check_folder_index(findings: list[Finding]) -> None:
         rel_parts = d.relative_to(ROOT).parts
         if any(part.startswith(".") or part in TOOL_DIRS for part in rel_parts):
             continue
+        if is_instance_path(Path(*rel_parts)):
+            continue          # an instance's folders are the instance's to index
         if SKILL_DIRS_ARE_EXEMPT_FROM_INDEX and in_skill_subtree(d):
             continue
         if FIXTURE_PACKS_ARE_EXEMPT_FROM_INDEX and FIXTURES_DIR in d.parents:
@@ -388,8 +471,28 @@ def check_public_safety(findings: list[Finding]) -> None:
                     "absolute /Users/ home path — a machine path is instance data"))
 
 
+def check_instance_paths_untracked(findings: list[Finding]) -> None:
+    """7. The framework tracks no file at an instance path.
+
+    The one-repository layout works only because the two owners' path sets are
+    disjoint: an upgrade is a merge of the framework's paths, and a merge cannot
+    touch a path the framework never tracks. This is the check that keeps the
+    sets disjoint. Skipped in an instance, where those paths are exactly what is
+    tracked.
+    """
+    if instance_mode():
+        return
+    for n in tracked_instance_paths():
+        findings.append(Finding(
+            "instance-path-tracked", n,
+            f"tracked at an instance path ({Path(n).parts[0]!r} is instantiated from "
+            f"instance-template/root/ and belongs to the instance from then on)"))
+
+
 def check_count_assertions(findings: list[Finding]) -> None:
     """6. Prose counts that a machine can re-derive actually match the tree."""
+    if instance_mode():
+        return                # the instance's own skills would inflate the count
     actual = {"skill directories in skills/": len(skill_dirs())}
     for filename, pattern, counted in COUNT_ASSERTIONS:
         p = ROOT / filename
@@ -449,6 +552,7 @@ def main() -> None:
     check_folder_index(findings)
     check_public_safety(findings)
     check_count_assertions(findings)
+    check_instance_paths_untracked(findings)
 
     if args.update_baseline:
         n = write_baseline(findings)

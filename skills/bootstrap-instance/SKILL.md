@@ -1,38 +1,39 @@
 ---
 name: "Bootstrap Instance"
-description: "Interactive first-run setup for a freshly-created meta-os instance repo (from meta-os-instance-template or built by hand): decide the backlog/tracking model, register the first project (and optionally its GitHub repo), and fill in CLAUDE.md. Use once, right after cloning a new instance — not a standing operating skill."
+description: "Interactive first-run setup for a fresh meta-os instance (a clone of the framework repository): run scripts/bootstrap.sh if it has not been run, then decide the backlog/tracking model, choose packs, register the first project (and optionally its GitHub repo), and fill in the instance contract .claude/CLAUDE.md. Use once, right after cloning — not a standing operating skill."
 ---
 
 # Bootstrap Instance
 
-A brand-new instance repo (cloned from
-[meta-os-instance-template](https://github.com/meta-agentic/meta-os-instance-template) or
-built by hand) is structurally correct but has **zero decisions made** — no backlog
-model chosen, no first project, no `CLAUDE.md` facts filled in. This skill runs that
-onboarding conversation once, so the estate starts from a real decision instead of an
-empty placeholder.
+A fresh instance — a clone of the framework repository, bootstrapped or not yet — is
+structurally correct but has **zero decisions made**: no backlog model chosen, no first
+project, no instance facts filled in. This skill runs that onboarding conversation once,
+so the estate starts from a real decision instead of an empty placeholder.
 
 Run this **once per new instance**, right after the repo is cloned and opened. It is
 not a standing operating skill — [[skills/agile-process/SKILL|agile-process]],
-[[skills/graphify/SKILL|graphify]], etc. take over from here.
+[[skills/graphify/SKILL|graphify]], etc. take over from here. The mechanical part of
+first run is `scripts/bootstrap.sh` ([[systems/distribution]]); this skill drives it and
+never re-implements what it does.
 
-## Step 0 — Framework mounts sanity
+## Step 0 — Bootstrap the checkout
 
-Before any decision, verify the framework is actually mounted (both consumption modes
-are described in [[systems/distribution]]):
+Check whether `.claude/CLAUDE.md` exists at the repository root. It is the instance
+contract, instantiated from `instance-template/root/` by `scripts/bootstrap.sh`, so:
 
-- `agents/`, `systems/`, `templates/` point at `.meta-os/*` (**submodule mode**, the
-  template default): if `.meta-os/` is empty the user cloned without `--recursive` —
-  run `git submodule update --init .meta-os` and re-check. (`skills/` is a real
-  directory — the union mount over framework + packs; `scripts/packs.sh sync` rebuilds
-  it if links dangle.)
-- Mounts point at `../meta-os/*` (**sibling mode**): confirm the sibling checkout
-  exists; if not, offer `scripts/framework-mode.sh submodule` to switch to the
-  self-contained mode instead.
-- Broken or missing symlinks either way → `scripts/framework-mode.sh <mode>` repairs
-  them.
+- **Absent** → the clone has not been bootstrapped. Ask for the instance name (default:
+  the directory name) and whether a private remote URL already exists, then run
+  `scripts/bootstrap.sh --yes --name <name> [--origin <url>]`. It instantiates the
+  instance files, turns the clone's `origin` into the fetch-only `upstream`, and builds
+  the discovery links. Read its output back to the user; offer `--commit`, or leave
+  the commit to Step 4. Packs are chosen in Step 1b, so don't pass `--packs` here.
+- **Present** → already bootstrapped. `scripts/bootstrap.sh --yes` is idempotent and
+  reports what exists; run it only if `.claude/skills/` is missing or dangling
+  (`scripts/packs.sh check` says so).
+- **`upstream` remote missing or `origin` still pointing at the public framework** →
+  that is bootstrap's job too; run it rather than fixing remotes by hand.
 
-Don't proceed while a mount dangles — every later step reads through them.
+Don't proceed until the instance files exist — every later step writes into them.
 
 ## Step 1 — Backlog & tracking model
 
@@ -48,7 +49,7 @@ Ask the user (present as distinct options, not a leading question):
    needs a Jira project key and (per that skill's convention) a private repo to hold the
    mirror.
 
-Record the choice in the instance's `CLAUDE.md`, "Instance facts" section:
+Record the choice in the instance contract `.claude/CLAUDE.md`, "Instance facts" section:
 
 - **(1)** — leave the authority-order line out entirely.
 - **(2)** — `**Backlog:** local JSON — see \`<path-to-backlog.json>\`. No external tracker.`
@@ -105,7 +106,12 @@ Ask how the project relates to GitHub:
 
 ## Step 4 — Wrap up
 
-- Fill in any remaining `CLAUDE.md` blanks (estate list now has at least one entry).
+- Fill in any remaining `.claude/CLAUDE.md` blanks (estate list now has at least one
+  entry) and the `_index.md` title if bootstrap's guess at the name was wrong.
+- Commit, if Step 0 did not: `git add -A && git commit -m "bootstrap: instantiate <name>"`,
+  and push to the private remote once it exists (`git push -u origin main`).
+- Mention the dashboard once: `scripts/bootstrap.sh --dashboard` clones it next to the
+  repo and points it here; it is optional and can be done any time.
 - If the project carries its own docs vault, offer to federate it —
   see [[vaults/_index|vaults/_index.md]] (`ln -s ../../<repo>/<vault-folder> vaults/<name>`).
 - Point out [[skills/graphify/SKILL|graphify]] as the natural next step once there's a

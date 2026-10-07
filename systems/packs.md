@@ -69,11 +69,11 @@ as-is.
 ## Mount model (in the instance)
 
 - A mounted pack lives at `.packs/<name>/` — a **pinned git submodule**, dot-folder so
-  Obsidian doesn't index it directly (same trick as `.meta-os/`).
-- The instance's `skills/` is a **union mount**: a real directory of per-skill
-  symlinks — every framework skill plus every skill from every mounted pack.
-  `scripts/packs.sh sync` (instance template) rebuilds it; re-run after a framework or
-  pack bump.
+  Obsidian doesn't index it directly; the pack is reached through its links.
+- `skills/` is the framework's own folder, and the pack skills are **linked into it**
+  beside the framework's real skill folders, as per-skill relative symlinks.
+  `scripts/packs.sh sync` places them (and lists them in `.git/info/exclude`, so they
+  are never committed); re-run after a framework upgrade or a pack bump.
 - **Collision rule: the framework wins.** A pack skill whose name collides with a core
   skill (or an earlier pack's) is skipped with a warning — deterministic, no shadowing.
   **Exception — a depended-upon skill never fails quietly.** If the skipped name is one
@@ -82,13 +82,13 @@ as-is.
   dependent pack citing a skill that isn't there, which surfaces later as an agent
   confidently improvising the discipline it was supposed to defer to.
 - Mounting also enriches the **project-local `.claude/` engine surface** —
-  `.claude/skills/` mirrors the union (sessions inside the instance discover
+  `.claude/skills/` mirrors `skills/` (sessions inside the instance discover
   everything with zero global setup; portable to containers/remote), pack `agents/`
   link into `.claude/agents/`, pack `hooks/` are **staged** at `.claude/hooks/<pack>/`.
   **Hooks are never auto-wired into `settings.json`** — a hook is executable code, so
   enabling one is an explicit, per-hook user decision, always.
 - Machine-global discovery (`~/.claude/skills/<name>`) remains available and chains
-  through the union dir to wherever the skill really lives.
+  through `skills/` to wherever the skill really lives — a framework folder or a pack link.
 
 ## The registry — [[systems/packs.yaml|packs.yaml]]
 
@@ -108,11 +108,11 @@ but reported as unregistered/unverified when added.
 
 | Action | Command (instance) | Effect |
 |--------|--------------------|--------|
-| Mount | `scripts/packs.sh add <name> [url]` | submodule at `.packs/<name>` + union re-sync |
-| Unmount | `scripts/packs.sh remove <name>` | submodule removed + union re-sync |
+| Mount | `scripts/packs.sh add <name> [url]` | submodule at `.packs/<name>` + link re-sync |
+| Unmount | `scripts/packs.sh remove <name>` | submodule removed + link re-sync |
 | Upgrade | `scripts/packs.sh update [name]` | pin bump (reviewable commit) + re-sync |
 | Inspect | `scripts/packs.sh list` | mounted packs, pins, skill counts |
-| Rebuild | `scripts/packs.sh sync` | regenerate the union `skills/` + `.claude/` |
+| Rebuild | `scripts/packs.sh sync` | regenerate the pack links in `skills/` + `.claude/` |
 | Reconcile | `scripts/packs.sh apply` | make mounts match the instance's `.packs.yaml` manifest |
 | Configure | `scripts/packs.sh config <pack> [key]` | resolve a pack's parameters (instance `config:` over `pack.yaml` defaults), validate enums |
 

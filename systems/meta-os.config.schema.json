@@ -2,25 +2,60 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/meta-agentic/meta-os/blob/main/systems/meta-os.config.schema.json",
   "title": "meta-os.config.json — instance estate configuration",
-  "description": "Schema for a meta-os instance's estate config (meta-os.config.json): the estate knowledge an adopter declares — variable prefixes, backlog mirrors, and memory topology. This is the FRAMEWORK level: valid keys, valid enum values, and defaults, carrying ZERO values. Deployment concerns (instanceRoot, frameworkRoot, github.*, auth, corsOrigins, claudeHome, dataDir) live in the dashboard's instance.config.json, not here. Every key is optional; omitting the file yields default behaviour.",
+  "description": "Schema for a meta-os instance's estate config (meta-os.config.json): the estate knowledge an adopter declares — variable prefixes, backlog mirrors, and memory topology. This is the FRAMEWORK level: valid keys, valid enum values, and defaults, carrying ZERO values. Deployment concerns (instanceRoot, frameworkRoot, github.*, auth, corsOrigins, claudeHome, dataDir) live in the dashboard's instance.config.json, not here. Every key is optional; omitting the file yields default behaviour. The `instance` block is the one key the framework writes (at bootstrap) rather than the adopter.",
   "type": "object",
   "additionalProperties": true,
   "properties": {
+    "instance": {
+      "type": "object",
+      "description": "The instantiation record scripts/bootstrap.sh writes on first run (one-repository layout, systems/distribution.md). name: the instance's name. bootstrapped: the date of the first run, YYYY-MM-DD. template: the framework commit whose instance-template/ was copied in; scripts/upgrade.sh diffs instance-template/ from it to report what the template changed since, and --ack-template moves it forward once the operator has reviewed that diff.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "bootstrapped": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        },
+        "template": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{7,40}$"
+        }
+      },
+      "required": [
+        "name",
+        "bootstrapped",
+        "template"
+      ],
+      "additionalProperties": false
+    },
     "vars": {
       "type": "object",
       "description": "Reusable string prefixes. ${name} in any config value (or a projects/*.md 'path:') expands to these, so a repo-root move is a one-line change.",
-      "additionalProperties": { "type": "string" }
+      "additionalProperties": {
+        "type": "string"
+      }
     },
     "backlogs": {
       "type": "array",
       "description": "Backlog mirrors this instance tracks, one per space/project.",
       "items": {
         "type": "object",
-        "required": ["space", "path"],
+        "required": [
+          "space",
+          "path"
+        ],
         "additionalProperties": false,
         "properties": {
-          "space": { "type": "string", "description": "Space/project key (e.g. the tracker project id)." },
-          "path": { "type": "string", "description": "Backlog source — a per-item raw/ directory (post-migration) or a legacy backlog.json. ${var} expands." }
+          "space": {
+            "type": "string",
+            "description": "Space/project key (e.g. the tracker project id)."
+          },
+          "path": {
+            "type": "string",
+            "description": "Backlog source — a per-item raw/ directory (post-migration) or a legacy backlog.json. ${var} expands."
+          }
         }
       }
     },
@@ -34,14 +69,28 @@
           "description": "Canon roots — counted AS the raw->wiki->output pipeline (promotable). Each declares a layout.",
           "items": {
             "type": "object",
-            "required": ["label", "path", "layout"],
+            "required": [
+              "label",
+              "path",
+              "layout"
+            ],
             "additionalProperties": false,
             "properties": {
-              "label": { "type": "string", "description": "Human label, e.g. \"instance\" or \"estate\"." },
-              "path": { "type": "string", "description": "Root path. ${var} expands." },
+              "label": {
+                "type": "string",
+                "description": "Human label, e.g. \"instance\" or \"estate\"."
+              },
+              "path": {
+                "type": "string",
+                "description": "Root path. ${var} expands."
+              },
               "layout": {
                 "type": "string",
-                "enum": ["flat", "tier/project", "project/tier"],
+                "enum": [
+                  "flat",
+                  "tier/project",
+                  "project/tier"
+                ],
                 "description": "flat = {raw,wiki,output} at the root. tier/project = {raw,wiki,output}/<project> — favours cross-project browsing on a directly-read root. project/tier = <project>/{raw,wiki,output} — favours per-project ownership and clean extraction, and is REQUIRED when the root is federated one-symlink-per-project (a project must map to a single mountable directory)."
               }
             }
@@ -52,11 +101,20 @@
           "description": "Federated mounts — surfaced in the graph for navigation/context, NEVER counted as canon.",
           "items": {
             "type": "object",
-            "required": ["label", "path"],
+            "required": [
+              "label",
+              "path"
+            ],
             "additionalProperties": false,
             "properties": {
-              "label": { "type": "string", "description": "Human label for the mount." },
-              "path": { "type": "string", "description": "Mount source path. ${var} expands." }
+              "label": {
+                "type": "string",
+                "description": "Human label for the mount."
+              },
+              "path": {
+                "type": "string",
+                "description": "Mount source path. ${var} expands."
+              }
             }
           }
         }

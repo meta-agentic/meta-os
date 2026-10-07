@@ -219,7 +219,10 @@ def backlog(cfg: dict, *args: str) -> tuple[int, str]:
     cli = cfg.get("backlog_cli")
     if not cli:
         return 0, "no backlog_cli configured (dry run)"
-    env = dict(os.environ, MOVA_VAULT=cfg["vault"])
+    # The backlog CLI finds the vault through METAOS_VAULT. The second name is a deprecated
+    # alias, still exported so an instance CLI that reads it keeps working; drop it once
+    # every instance CLI reads METAOS_VAULT.
+    env = dict(os.environ, METAOS_VAULT=cfg["vault"], MOVA_VAULT=cfg["vault"])
     r = subprocess.run([sys.executable, cli, *args], cwd=cfg["vault"], env=env, capture_output=True, text=True, timeout=120)
     return r.returncode, (r.stdout + r.stderr).strip()
 

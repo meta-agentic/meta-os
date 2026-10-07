@@ -9,7 +9,7 @@
 .swarm/
 .agentic-qe/
 
-# Vendored duplicate: isohub/extraction/tessera is a copy of the tessera repo,
+# Vendored duplicate: an extraction/ folder that copies another repository,
 # which is graphed from its own checkout. Including both mints two nodes for
 # every class and invents edges between them.
 extraction/

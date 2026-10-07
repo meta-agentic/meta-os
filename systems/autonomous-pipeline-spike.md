@@ -34,7 +34,7 @@ coordination ([[systems/engine]]), or removing the human from the decisions that
 
 | Loop | Period | Actuates | Bounded by |
 |---|---|---|---|
-| **Dispatch** (ADR-MOS-11) | tick, plus merge events | which items start, on which lane | `N` tokens, fairness cap, the one rule |
+| **Dispatch** (closed loop: keep lanes populated under the WIP cap) | tick, plus merge events | which items start, on which lane | `N` tokens, fairness cap, the one rule |
 | **Token regulator** | tick | `N` (and through it, `m` in use) | `N ∈ [N_min, N_max]`, one step per tick, hard freeze on rate-limit signals |
 | **Reflection** | tick | writes a record; may move `N` by one within the regulator's bounds; may pause a space; escalates everything else | never writes item status, never merges, never changes budgets |
 | **Speculation** | when a decision is pending and idle capacity exists | starts one lane per branch of the decision, output to a scratch area | never merges, never transitions, capped share of `N` |

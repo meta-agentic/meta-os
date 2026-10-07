@@ -7,9 +7,10 @@ tags: [os, pipeline, automation]
 Design: [[systems/swarm-pipeline]] · sizing: [[systems/swarm-pipeline-queueing]] ·
 autonomy (regulator, reflection, speculation): [[systems/autonomous-pipeline-spike]].
 
-This folder is **mechanism, not policy** (ADR-MOS-10): it holds no repository names, no
-budgets, no prompts. An instance supplies a config file and a state directory; a harness
-in the instance executes what `tick.py plan` emits and feeds the outcome back through
+This folder is **mechanism, not policy** — instances mount it rather than copy it, so it
+must run unchanged in every one of them: it holds no repository names, no budgets, no
+prompts. An instance supplies a config file and a state directory; a harness in the
+instance executes what `tick.py plan` emits and feeds the outcome back through
 `tick.py record`.
 
 | File | What |
@@ -21,6 +22,7 @@ in the instance executes what `tick.py plan` emits and feeds the outcome back th
 | `metaos_pipeline/reflect.py` | predicted (queueing model) vs measured, attribution rules, escalations, the reflection record |
 | `metaos_pipeline/ledger.py` | atomic state, materialised lanes, append-only events / runs / reflections, a directory lock |
 | `tests/test_pipeline.py` | `python3 -m unittest discover -s pipeline/tests` |
+| `metaos_pipeline/`, `tests/` | each has its own index — [[pipeline/metaos_pipeline/_index\|metaos_pipeline/]] · [[pipeline/tests/_index\|tests/]] |
 
 ## Contract with the harness
 
@@ -39,8 +41,9 @@ sessions in `check`, and returns `results.json`:
 
 `record` is idempotent per lane state and is the **only writer of item status**: it
 transitions to `IN PROGRESS` when a lane starts and to `IN REVIEW` when a lane ends with a
-PR, through the instance's backlog CLI, then commits the vault with a message that names
-every transition, lane, session and branch.
+PR, through the instance's backlog CLI (which receives the vault path in `METAOS_VAULT`),
+then commits the vault with a message that names every transition, lane, session and
+branch.
 
 ## Invariants
 

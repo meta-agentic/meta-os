@@ -51,7 +51,7 @@ def regulate(N: int, burn: float, target: float, rate_status: str,
     if target <= 0:
         return Decision(N, N_min, True, "no budget: hold at minimum and freeze")
     if burn > target * (1.0 + eps):
-        # Refractory decrease (ADR-MOS-12 correction): the regulator never stops a lane
+        # Refractory decrease (corrects an observed cap collapse): the regulator never stops a lane
         # mid-item, so a decrease only reaches the plant once running lanes drain below the
         # cap. Halving again before that collapses the cap while burn has not moved.
         if active_lanes is not None and active_lanes > N:

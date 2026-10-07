@@ -42,30 +42,30 @@ body of {id_}
 class FakeVault:
     def __init__(self):
         self.dir = tempfile.mkdtemp(prefix="vault-")
-        write(os.path.join(self.dir, "aaa", "sprints", "AAA-S1.md"),
-              "---\nkind: sprint\nspace: aaa\nsprintId: AAA-S1\nstate: active\ncommitted:\n- AAA-2\n---\n")
+        write(os.path.join(self.dir, "spacea", "sprints", "SPACEA-S1.md"),
+              "---\nkind: sprint\nspace: spacea\nsprintId: SPACEA-S1\nstate: active\ncommitted:\n- SPACEA-2\n---\n")
         for id_, st, title, deps, labels in [
-            ("AAA-1", "REFINED", "[SPA] first thing", (), ()),
-            ("AAA-2", "REFINED", "[SPA] second thing committed", (), ()),
-            ("AAA-3", "REFINED", "[INF] infra thing", ("AAA-5",), ()),
-            ("AAA-4", "REFINED", "[INF] infra other", (), ()),
-            ("AAA-5", "TO DO", "[SPA] not ready", (), ()),
-            ("AAA-6", "REFINED", "[SPA] blocked one", (), ("blocked",)),
-            ("AAA-9", "DONE", "done dep", (), ()),
+            ("SPACEA-1", "REFINED", "[SPA] first thing", (), ()),
+            ("SPACEA-2", "REFINED", "[SPA] second thing committed", (), ()),
+            ("SPACEA-3", "REFINED", "[INF] infra thing", ("SPACEA-5",), ()),
+            ("SPACEA-4", "REFINED", "[INF] infra other", (), ()),
+            ("SPACEA-5", "TO DO", "[SPA] not ready", (), ()),
+            ("SPACEA-6", "REFINED", "[SPA] blocked one", (), ("blocked",)),
+            ("SPACEA-9", "DONE", "done dep", (), ()),
         ]:
             tier, text = item(id_, st, title, deps, labels=labels)
-            write(os.path.join(self.dir, "aaa", tier, f"{id_}.md"), text)
+            write(os.path.join(self.dir, "spacea", tier, f"{id_}.md"), text)
         # a space without an active sprint: never ready
-        tier, text = item("BBB-1", "REFINED", "[X] orphan")
-        write(os.path.join(self.dir, "bbb", tier, "BBB-1.md"), text)
+        tier, text = item("SPACEB-1", "REFINED", "[X] orphan")
+        write(os.path.join(self.dir, "spaceb", tier, "SPACEB-1.md"), text)
 
     def cleanup(self):
         shutil.rmtree(self.dir, ignore_errors=True)
 
 
 CFG = {
-    "spaces": {"aaa": {"repo": "org/app", "repo_by_tag": {"INF": "org/infra"}, "branch_prefix": "AAA/"},
-               "bbb": {"repo": "org/b"}},
+    "spaces": {"spacea": {"repo": "org/app", "repo_by_tag": {"INF": "org/infra"}, "branch_prefix": "SPACEA/"},
+               "spaceb": {"repo": "org/b"}},
     "ready_statuses": ["REFINED"], "fairness_share": 0.5,
     "regulator": {"N": 4},
 }
@@ -81,17 +81,17 @@ class ReadySetTests(unittest.TestCase):
     def test_ready_filters_and_orders(self):
         ready = readyset.ready_items(self.v.dir, CFG)
         ids = [i.id for i in ready]
-        self.assertEqual(ids[0], "AAA-2", "committed item first")
-        self.assertIn("AAA-1", ids); self.assertIn("AAA-4", ids)
-        self.assertNotIn("AAA-3", ids, "dependency not DONE")
-        self.assertNotIn("AAA-5", ids, "TO DO is not ready")
-        self.assertNotIn("AAA-6", ids, "blocked label")
-        self.assertNotIn("BBB-1", ids, "no active sprint")
-        infra = next(i for i in ready if i.id == "AAA-4")
-        self.assertEqual(infra.repo, "org/infra"); self.assertTrue(infra.branch.startswith("AAA/AAA-4-"))
+        self.assertEqual(ids[0], "SPACEA-2", "committed item first")
+        self.assertIn("SPACEA-1", ids); self.assertIn("SPACEA-4", ids)
+        self.assertNotIn("SPACEA-3", ids, "dependency not DONE")
+        self.assertNotIn("SPACEA-5", ids, "TO DO is not ready")
+        self.assertNotIn("SPACEA-6", ids, "blocked label")
+        self.assertNotIn("SPACEB-1", ids, "no active sprint")
+        infra = next(i for i in ready if i.id == "SPACEA-4")
+        self.assertEqual(infra.repo, "org/infra"); self.assertTrue(infra.branch.startswith("SPACEA/SPACEA-4-"))
 
     def test_public_repo_branch_carries_no_id(self):
-        cfg = {**CFG, "spaces": {"aaa": {**CFG["spaces"]["aaa"], "public": True, "branch_prefix": "pipeline/"}}}
+        cfg = {**CFG, "spaces": {"spacea": {**CFG["spaces"]["spacea"], "public": True, "branch_prefix": "pipeline/"}}}
         ready = readyset.ready_items(self.v.dir, cfg)
         for it in ready:
             self.assertTrue(it.branch.startswith("pipeline/")); self.assertNotIn(it.id, it.branch)
@@ -101,13 +101,13 @@ class ReadySetTests(unittest.TestCase):
         chosen = readyset.assign(ready, [], 4, CFG)
         keys = {(c.space, c.repo, c.primary_tag) for c in chosen}
         self.assertEqual(len(keys), len(chosen), "one lane per (space, repo, tag)")
-        self.assertLessEqual(len(chosen), 2, "fairness: aaa may hold at most half of N=4")
+        self.assertLessEqual(len(chosen), 2, "fairness: spacea may hold at most half of N=4")
         # a running SPA lane blocks further SPA items
-        running = [{"space": "aaa", "repo": "org/app", "primary_tag": "SPA", "status": "running"}]
+        running = [{"space": "spacea", "repo": "org/app", "primary_tag": "SPA", "status": "running"}]
         chosen2 = readyset.assign(ready, running, 3, CFG)
         self.assertTrue(all(c.primary_tag != "SPA" for c in chosen2))
         self.assertEqual(readyset.assign(ready, [], 0, CFG), [])
-        self.assertEqual(readyset.assign(ready, [], 3, CFG, paused_spaces=["aaa"]), [])
+        self.assertEqual(readyset.assign(ready, [], 3, CFG, paused_spaces=["spacea"]), [])
 
 
 class ControllerTests(unittest.TestCase):
@@ -230,6 +230,19 @@ class TickEndToEnd(unittest.TestCase):
             self.assertIn("## Regulator trace", text); self.assertIn("in_review", text)
         finally:
             v.cleanup(); shutil.rmtree(state, ignore_errors=True); shutil.rmtree(cfgdir, ignore_errors=True)
+
+
+class BacklogCliTests(unittest.TestCase):
+    def test_cli_receives_vault_path(self):
+        vault = tempfile.mkdtemp(prefix="vault-")
+        try:
+            cli = os.path.join(vault, "fake_backlog.py")
+            write(cli, "import os\nprint(os.environ['METAOS_VAULT'])\n")
+            rc, out = tick.backlog({"backlog_cli": cli, "vault": vault}, "status")
+            self.assertEqual(rc, 0)
+            self.assertEqual(out, vault)
+        finally:
+            shutil.rmtree(vault, ignore_errors=True)
 
 
 if __name__ == "__main__":

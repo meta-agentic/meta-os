@@ -68,6 +68,27 @@ find the deep material without wading through the basics being re-explained.
 - **Tables for enumerables, prose for reasoning.** Catalogs of services, modules,
   or files are tables; the *why* around them is prose.
 
+## Decision records
+
+Every repo that keeps decision records names and indexes them the same way, and this section is that convention's one home: a repo's record index links here rather than restating it. What makes a record worth keeping (forces, rejected alternatives, accepted cost, reopening trigger) belongs to the [decision-records skill](https://github.com/meta-agentic/meta-discipline-swe/blob/main/skills/decision-records/SKILL.md); this section fixes only where records live, what they are called, and how they are numbered.
+
+| | Rule |
+|---|---|
+| **Home** | the repo's `adr_home` (a decision-records config key; default `docs/adr/`) |
+| **File name** | `ADR-<KEY>-<NN>-<kebab-slug>.md` — `<KEY>` is the project's short uppercase key; `<NN>` is two digits, widening if the log ever passes 99 |
+| **Title line** | `ADR-<KEY>-<NN> — <title>` |
+| **Citation** | `ADR-<KEY>-<NN>` |
+
+Numbering:
+
+- **Consecutive in the order records are written.** The next record takes the next free number. No reserved numbers and no gaps: an empty slot carries no information and reads as a deleted record.
+- **A planned record has a topic, not a number.** Cite it by its topic until it is written; it takes the next free number then.
+- **A number is never reused.** A rejected or superseded record keeps its number.
+
+The index is a `README.md` in `adr_home`: a table of the records (number, title, status, link), then an unnumbered list of planned topics. It links to this section instead of restating the rule, because a restated rule is a copy, and copies drift.
+
+Status and immutability follow the skill: `proposed → accepted → superseded` (or `rejected`). An accepted record's decision is never edited, only superseded by a new record, linked both ways; a status change is the only permitted edit.
+
 ## Maintenance
 
 Treat the entry README as part of the change, not as an afterthought: a PR that

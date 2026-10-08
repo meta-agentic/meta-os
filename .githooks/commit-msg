@@ -1,0 +1,14 @@
+#!/bin/sh
+# The instance's own commit-msg hooks. Enable per clone: git config core.hooksPath .githooks
+#
+# Extension point (systems/distribution.md): every executable file named like a
+# run-parts part (letters, digits, '_' and '-'; a symlink is followed) in
+# .githooks.d/commit-msg/ runs in name order with the message file as its argument;
+# the first that fails rejects the commit. The framework adds no check of its own
+# here; it ships the hook so an instance never has to own a file in .githooks/.
+root="$(git rev-parse --show-toplevel)"
+for hook in "$root/.githooks.d/commit-msg"/*; do
+  case "${hook##*/}" in *[!A-Za-z0-9_-]*) continue ;; esac   # run-parts names: no *.orig, *~, .swp
+  [ -f "$hook" ] && [ -x "$hook" ] || continue
+  "$hook" "$@" || exit $?
+done

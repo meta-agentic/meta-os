@@ -163,11 +163,92 @@ class PacksShTest(unittest.TestCase):
         self.packs("apply")
         self.assertIn("mounts match", self.packs("check").stdout)
 
+    def mount_and_commit(self, *names: str):
+        self.manifest(*(names or ("alpha",)))
+        self.packs("apply")
+        git(self.inst, "add", ".gitmodules", ".packs", ".packs.yaml")
+        git(self.inst, "commit", "-q", "-m", "mount")
+
     def test_pack_names_are_validated_before_they_become_paths(self):
-        for bad in ("alpha/..", "../x", "a b"):
-            r = self.packs("remove", bad, check=False)
-            self.assertNotEqual(r.returncode, 0)
-            self.assertIn("invalid pack name", r.stderr)
+        self.mount_and_commit("alpha", "beta")
+        for cmd in (("remove", "alpha/.."), ("remove", "../x"), ("remove", "a b"),
+                    ("add", "../x", "/nowhere"), ("update", "alpha/.."), ("config", "../alpha")):
+            with self.subTest(cmd=cmd):
+                r = self.packs(*cmd, check=False)
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn("invalid pack name", r.stderr)
+        for name in PACKS:   # remove 'alpha/..' would have deinit -f'd every pack
+            self.assertTrue(any((self.inst / ".packs" / name).iterdir()), name)
+
+    def test_a_symlink_where_a_pin_is_recorded_is_refused(self):
+        # the old hand-made layout: .packs/<pack> -> a development clone
+        self.mount_and_commit()
+        dev = self.tmp / "dev-alpha"
+        git(self.tmp, "clone", "-q", self.urls["alpha"], str(dev))
+        git(self.inst, "submodule", "deinit", "-q", "-f", ".packs/alpha")
+        (self.inst / ".packs" / "alpha").rmdir()
+        (self.inst / ".packs" / "alpha").symlink_to(dev)
+        for cmd in ("check", "apply"):
+            with self.subTest(cmd=cmd):
+                r = self.packs(cmd, check=False)
+                self.assertNotEqual(r.returncode, 0, r.stdout)
+                self.assertIn("symlink mount: .packs/alpha", r.stderr)
+
+    def test_a_modified_mount_is_refused_and_remove_keeps_its_changes(self):
+        self.mount_and_commit()
+        skill = self.inst / ".packs" / "alpha" / "skills" / "alpha-one" / "SKILL.md"
+        skill.write_text(skill.read_text() + "local edit\n")
+        r = self.packs("check", check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("modified mount: .packs/alpha", r.stderr)
+        r = self.packs("remove", "alpha", check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("local changes", r.stderr)
+        self.assertIn("local edit", skill.read_text())
+
+    def test_sync_refuses_a_symlinked_claude_skills(self):
+        self.manifest("alpha")
+        self.packs("apply")
+        cs = self.inst / ".claude" / "skills"
+        shutil.rmtree(cs)
+        cs.symlink_to(self.tmp)
+        r = self.packs("sync", check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn(".claude/skills is a symlink", r.stderr)
+
+    def test_remove_in_a_linked_worktree_drops_its_module_gitdir(self):
+        self.mount_and_commit("alpha", "beta")
+        wt = self.tmp / "wt"
+        git(self.inst, "worktree", "add", "-q", str(wt))
+        run = lambda *a: subprocess.run(["scripts/packs.sh", *a], cwd=wt, capture_output=True,
+                                        text=True, timeout=120, env={**os.environ, **GIT_ENV})
+        r = run("apply")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        gd = Path(git(wt, "rev-parse", "--path-format=absolute", "--git-path", "modules/.packs/beta").strip())
+        self.assertTrue(gd.is_dir(), gd)
+        r = run("remove", "beta")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(gd.exists(), "the worktree's module gitdir must go with the pack")
+
+    # --- the instance's ignore rules -----------------------------------------------------
+
+    def test_sync_applies_the_instance_ignore_rules_and_follows_their_edits(self):
+        (self.inst / ".gitignore.instance").write_text("# mine\nlocal-cache/\n")
+        out = self.packs("sync").stdout
+        self.assertIn("1 instance ignore rule(s) applied", out)
+        (self.inst / "local-cache").mkdir()
+        (self.inst / "local-cache" / "x").write_text("x\n")
+        (self.inst / "scratch.tmp").write_text("x\n")
+        status = git(self.inst, "status", "--porcelain", "--untracked-files=all")
+        self.assertNotIn("local-cache/", status)
+        self.assertIn("scratch.tmp", status)
+        (self.inst / ".gitignore.instance").write_text("*.tmp\n")
+        self.packs("sync")
+        status = git(self.inst, "status", "--porcelain", "--untracked-files=all")
+        self.assertIn("local-cache/x", status)              # the old rule is gone, not appended to
+        self.assertNotIn("scratch.tmp", status)
+        exclude = (self.inst / ".git" / "info" / "exclude").read_text()
+        self.assertEqual(1, exclude.count(".gitignore.instance (edit that file"))
 
     def test_config_resolves_the_instance_over_the_pack_default_and_validates_enums(self):
         self.manifest("alpha")

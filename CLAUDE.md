@@ -50,7 +50,8 @@ The two path sets are disjoint and each has one owner ([[systems/distribution]])
 framework **never tracks an instance path** — `scripts/validate_framework.py` derives
 those paths from `instance-template/root/` and fails on any tracked file there — and an
 instance **never edits a framework path** — `scripts/upgrade.sh` refuses to merge while
-one is modified. That is what makes an upgrade a merge that cannot collide. Pack skills
+one is modified; the instance's own hooks and root ignore rules live in `.githooks.d/` and
+`.gitignore.instance`, which the framework's files dispatch to. That is what makes an upgrade a merge that cannot collide. Pack skills
 are linked into `skills/` beside the framework's own by `scripts/packs.sh sync` and
 mirrored into `.claude/skills/`; those links are generated and never committed.
 Vault-root-relative wikilinks (`[[skills/…]]`, `[[systems/…]]`) resolve the same in a

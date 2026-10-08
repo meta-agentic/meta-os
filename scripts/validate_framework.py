@@ -38,10 +38,20 @@ never tracks. This gate therefore scopes itself to the framework's own paths
 and refuses, in the framework, any tracked file at an instance path. The
 instance paths are not a hand-kept list: they are read from
 `instance-template/root/`, the payload `scripts/bootstrap.sh` instantiates.
+
+Inside an instance, "the framework's own paths" is read from git, not guessed:
+it is the tree of the framework commit last merged here (the merge base with
+`$META_OS_FRAMEWORK_REF`, default `upstream/main`). An instance may add files
+anywhere — a top-level folder of its own, a workflow beside the framework's in
+`.github/workflows/` — and none of them is the framework's to judge. Without that
+ref (no `upstream` remote yet) the scope falls back to "everything but the
+template's instance paths", and the gate says so.
 """
 from __future__ import annotations
 
 import argparse
+import functools
+import os
 import re
 import subprocess
 import sys
@@ -93,6 +103,41 @@ def is_instance_path(rel: Path) -> bool:
 # check_skill_registration) and the count assertion is skipped.
 def instance_mode() -> bool:
     return (ROOT / ".claude" / "CLAUDE.md").is_file()
+
+
+def _git(*args: str) -> str | None:
+    try:
+        return subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True,
+                              check=True, text=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+@functools.lru_cache(maxsize=None)
+def framework_scope() -> tuple[str, frozenset[str], frozenset[str]] | None:
+    """In an instance: (ref, files, folders) the framework tracks at the last merged commit.
+
+    None outside an instance (everything tracked is the framework's) and when no
+    framework ref is reachable (the template-derived fallback applies). An instance
+    COMMITS its contract; a framework developer's checkout (`bootstrap.sh --local`)
+    only has it on disk, excluded — and must keep the full scope, or a file added on
+    a branch there would escape the gate whenever an `upstream` remote exists.
+    """
+    if not instance_mode() or _git("ls-files", "--error-unmatch", ".claude/CLAUDE.md") is None:
+        return None
+    # An override can only widen the scope: the merge base with upstream/main still counts,
+    # so a stale $META_OS_FRAMEWORK_REF cannot hide a file the framework added since.
+    refs = dict.fromkeys(r for r in (os.environ.get("META_OS_FRAMEWORK_REF"), "upstream/main") if r)
+    bases = [b.strip() for b in (_git("merge-base", "HEAD", r) for r in refs) if b]
+    names: set[str] = set()
+    for base in bases:
+        names.update(n for n in (_git("ls-tree", "-r", "-z", "--name-only", base) or "").split("\0") if n)
+    if not names:
+        return None
+    files = frozenset(names)
+    folders = frozenset("/".join(Path(n).parts[:i]) for n in files
+                        for i in range(1, len(Path(n).parts)))
+    return " + ".join(b[:12] for b in dict.fromkeys(bases)), files, folders
 
 # ---------------------------------------------------------------------------
 # The `_index.md` convention, and the one ambiguity in it — resolved here.
@@ -326,6 +371,9 @@ def tracked_files() -> list[Path]:
                  and not any(part.startswith(".") for part in p.relative_to(ROOT).parts[:-1])]
     # An instance's own files are not the framework's to scan (and in the framework
     # repository the layout check below is what catches one being tracked at all).
+    scope = framework_scope()
+    if scope:
+        return [p for p in files if p.relative_to(ROOT).as_posix() in scope[1]]
     return [p for p in files if not is_instance_path(p.relative_to(ROOT))]
 
 
@@ -385,8 +433,15 @@ def check_skill_registration(findings: list[Finding]) -> None:
 
 
 def check_index_resolves(findings: list[Finding]) -> None:
-    """2. Every catalogued entry resolves to a skill that exists on disk."""
+    """2. Every catalogued entry resolves to a skill that exists on disk.
+
+    A pack skill the catalog lists resolves when its pack is mounted: the link
+    `scripts/packs.sh sync` places in skills/ leads to a real SKILL.md.
+    """
     on_disk = {d.name for d in skill_dirs()}
+    if SKILLS_DIR.is_dir():
+        on_disk |= {d.name for d in SKILLS_DIR.iterdir()
+                    if d.is_symlink() and (d / SKILL_NAME).is_file()}
     for name in sorted(index_entries()):
         if name not in on_disk:
             findings.append(Finding(
@@ -396,8 +451,11 @@ def check_index_resolves(findings: list[Finding]) -> None:
 
 def check_systems_front_matter(findings: list[Finding], note_types: set[str]) -> None:
     """3. Every systems/*.md carries non-empty type + tags, type declared in the ontology."""
+    scope = framework_scope()
     for p in sorted(SYSTEMS_DIR.glob("*.md")):
         rel = str(p.relative_to(ROOT))
+        if scope and p.relative_to(ROOT).as_posix() not in scope[1]:
+            continue          # the instance's own note in systems/ — its own to shape
         fm = front_matter(p)
         if fm is None:
             findings.append(Finding("systems-front-matter", rel,
@@ -427,12 +485,15 @@ def check_folder_index(findings: list[Finding]) -> None:
     `SKILL_DIRS_ARE_EXEMPT_FROM_INDEX` (a skill directory is self-describing) and
     `FIXTURE_PACKS_ARE_EXEMPT_FROM_INDEX` (a fixture pack is a gate's input).
     """
+    scope = framework_scope()
     for d in sorted(p for p in ROOT.rglob("*") if p.is_dir()):
         rel_parts = d.relative_to(ROOT).parts
         if any(part.startswith(".") or part in TOOL_DIRS for part in rel_parts):
             continue
         if is_instance_path(Path(*rel_parts)):
             continue          # an instance's folders are the instance's to index
+        if scope and "/".join(rel_parts) not in scope[2]:
+            continue          # a folder the framework does not track: the instance's own
         if SKILL_DIRS_ARE_EXEMPT_FROM_INDEX and in_skill_subtree(d):
             continue
         if FIXTURE_PACKS_ARE_EXEMPT_FROM_INDEX and FIXTURES_DIR in d.parents:
@@ -560,6 +621,11 @@ def main() -> None:
               f"{BASELINE.relative_to(ROOT)}")
         return
 
+    if instance_mode() and _git("ls-files", "--error-unmatch", ".claude/CLAUDE.md") is not None:
+        scope = framework_scope()
+        print(f"  instance: checking the framework's paths at {scope[0]}" if scope else
+              "  instance: no framework ref (set META_OS_FRAMEWORK_REF or add the `upstream` "
+              "remote) — scope approximated by instance-template/root/")
     baseline = read_baseline()
     errors, warns = [], []
     for f in findings:
@@ -581,7 +647,9 @@ def main() -> None:
             e, w = per_class[check]
             print(f"  {check:<22} {e:>5}  {w:>5}")
 
-    stale = baseline - {f.key for f in findings}
+    # In an instance the baseline is the framework's: debt it records may well be absent
+    # here (a catalogued pack skill resolves once its pack is mounted), and is not ours to drop.
+    stale = set() if instance_mode() else baseline - {f.key for f in findings}
     if stale:
         print(f"\n  {len(stale)} baseline line(s) no longer match a violation — "
               f"fixed debt; drop them from {BASELINE.relative_to(ROOT)}:")

@@ -11,8 +11,23 @@
 #   scripts/upgrade.sh             # upgrade
 #   scripts/upgrade.sh --check     # report only: commits behind, integrity, template drift
 #
+# A repository that was an instance BEFORE it had the framework's history (its own
+# contract in the root CLAUDE.md, framework folders mounted as symlinks, its own hooks
+# and ignores) is adopted once, with the copy of this script on the fetched framework.
+# That pipes whatever `upstream` serves into bash, so check the remote first:
+#
+#   git remote get-url upstream      # https://github.com/meta-agentic/meta-os.git, or a fork you trust
+#   git fetch upstream && git show upstream/main:scripts/upgrade.sh | bash -s -- --adopt --dry-run
+#
 # Options
 #   --check          report, change nothing (exit 0 even when behind)
+#   --adopt          first merge into a pre-existing instance (scripts/adopt.py): moves the
+#                    root contract to .claude/CLAUDE.md, removes symlink mounts at framework
+#                    paths, moves instance hooks and ignore rules to their extension points,
+#                    lists every other instance file the framework's version would replace
+#   --dry-run        print the plan and write nothing — no fetch, merge, commit, index or
+#                    exclude change (with --adopt: the adoption plan; without: as --check)
+#   --yes            with --adopt: accept replacing the instance content the plan lists
 #   --remote NAME    the framework remote (default: upstream)
 #   --branch NAME    the framework branch (default: main)
 #   --force          merge even though a framework path was edited here (you resolve what conflicts)
@@ -24,9 +39,9 @@ set -euo pipefail
 
 die() { echo "upgrade: $*" >&2; exit 1; }
 say() { printf '%s\n' "$*"; }
-usage() { sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
+usage() { if [ -f "$0" ]; then sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; else echo "see systems/distribution.md"; fi; }
 
-remote=upstream branch=main check=0 force=0 sync=1 ack=0
+remote=upstream branch=main check=0 force=0 sync=1 ack=0 adopt=0 dry=0 yes=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --check) check=1; shift ;;
@@ -35,28 +50,102 @@ while [ $# -gt 0 ]; do
     --force) force=1; shift ;;
     --no-sync) sync=0; shift ;;
     --ack-template) ack=1; shift ;;
+    --adopt) adopt=1; shift ;;
+    --dry-run) dry=1; shift ;;
+    --yes|-y) yes=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option '$1' (see --help)" ;;
   esac
 done
+[ "$adopt" = 0 ] || [ "$check" = 0 ] || dry=1    # --adopt --check is the adoption's dry run
+[ "$dry" = 0 ] || check=1        # a dry run never merges, with --adopt or without
 
 root=$(git rev-parse --show-toplevel 2>/dev/null) || die "not inside a git checkout"
 cd "$root"
-[ -f .claude/CLAUDE.md ] || die "this checkout is not bootstrapped — run scripts/bootstrap.sh first (a plain framework checkout just pulls)"
-git remote | grep -qx "$remote" || die "no remote '$remote' — scripts/bootstrap.sh configures it, or: git remote add upstream https://github.com/meta-agentic/meta-os.git"
+# "done" is never printed over a tree this run left dirty: what git status shows at the
+# end must be what it showed at the start, or less.
+# Per file (--untracked-files=all), so a folder of the operator's untracked files does not
+# collapse into one line that changes shape when the framework adds a file beside them.
+status_before=$(git status --porcelain --untracked-files=all)
+new_dirt() { git status --porcelain --untracked-files=all | grep -vxF -f <(printf '%s\n' "$status_before") || true; }
+# A failure after the merge commit says what it left and how to go back.
+after_merge() {
+  if [ "$(git rev-parse HEAD)" = "$head" ]; then die "$1"$'\n'"  state: nothing was merged (HEAD $(git rev-parse --short HEAD))"; fi
+  die "$1"$'\n'"  state: the merge is committed (HEAD $(git rev-parse --short HEAD)); nothing else was rolled back."$'\n'"  to undo this run: git reset --hard $(git rev-parse --short "$head")"
+}
 target="$remote/$branch"
+if [ ! -f .claude/CLAUDE.md ] && [ "$adopt" = 0 ]; then
+  cat >&2 <<MSG
+upgrade: this checkout is not bootstrapped (no .claude/CLAUDE.md).
+  A fresh clone of meta-os:            scripts/bootstrap.sh   (a plain framework checkout just pulls)
+  An instance with its own history:    git fetch $remote && git show $target:scripts/upgrade.sh | bash -s -- --adopt --dry-run
+MSG
+  exit 1
+fi
+git remote | grep -qx "$remote" || die "no remote '$remote' — scripts/bootstrap.sh configures it, or: git remote add upstream https://github.com/meta-agentic/meta-os.git"
+# The gate scopes itself to the paths the framework tracks at this ref (scripts/validate_framework.py).
+export META_OS_FRAMEWORK_REF="$target"
 
 cfg=meta-os.config.json
 template_ref() { [ -f "$cfg" ] && sed -n 's/.*"template": *"\([0-9a-f]\{7,40\}\)".*/\1/p' "$cfg" | head -1 || true; }
 
 # --- 0. fetch ----------------------------------------------------------------------
-say "upgrade — fetching $target"
-git fetch -q "$remote" "$branch" || die "fetch from '$remote' failed"
-git rev-parse -q --verify "$target^{commit}" >/dev/null || die "no $target after fetch"
+if [ "$dry" = 1 ]; then
+  say "upgrade — dry run on the already fetched $target (nothing is fetched or written)"
+  git rev-parse -q --verify "$target^{commit}" >/dev/null || die "no $target yet — git fetch $remote first"
+else
+  say "upgrade — fetching $target"
+  git fetch -q "$remote" "$branch" || die "fetch from '$remote' failed"
+  git rev-parse -q --verify "$target^{commit}" >/dev/null || die "no $target after fetch"
+fi
+# This run executes (and merges) what that remote serves: name it, and flag one that is not
+# the public framework repository.
+url=$(git remote get-url "$remote")
+norm() { printf '%s' "${1%/}" | sed -e 's|\.git$||' -e 's|^git@github\.com:|https://github.com/|'; }
+if [ "$(norm "$url")" != "https://github.com/meta-agentic/meta-os" ]; then
+  say "  note: $remote is $url, not the public framework repository — make sure you trust it"
+fi
 head=$(git rev-parse HEAD); new=$(git rev-parse "$target")
 base=$(git merge-base HEAD "$target" 2>/dev/null || true)
 behind=$(git rev-list --count "HEAD..$target")
-say "  framework: $(git rev-parse --short "$target") on $target — this instance is $behind commit(s) behind"
+say "  framework: $(git rev-parse --short "$target") on $target ($url) — this instance is $behind commit(s) behind"
+
+# --- adopt: the first merge into a pre-existing instance -----------------------------------
+if [ "$adopt" = 1 ]; then
+  if [ -n "$base" ]; then
+    say "  this repository already shares history with $target — nothing to adopt; this is an ordinary upgrade$([ "$check" = 1 ] && echo ", reported only")"
+    [ -f .claude/CLAUDE.md ] || die "no .claude/CLAUDE.md — move the instance contract there by hand, then re-run"
+  else
+    command -v python3 >/dev/null 2>&1 || die "--adopt needs python3"
+    aargs=(--target "$target"); [ "$dry" = 0 ] || aargs+=(--dry-run); [ "$yes" = 0 ] || aargs+=(--yes)
+    # Read from the fetched framework, not the working tree: the instance may not carry it yet.
+    # Written to a file first, so a framework that lacks it stops here instead of handing
+    # python an empty program (which "succeeds"). stdin stays the caller's: this script
+    # may itself be arriving on it.
+    prog=$(mktemp -d "${TMPDIR:-/tmp}/meta-os-adopt.XXXXXX")
+    trap 'rm -rf "$prog"' EXIT
+    for f in adopt.py adopt_plan.py; do
+      git show "$target:scripts/$f" > "$prog/$f" 2>/dev/null \
+        || die "$target has no scripts/$f — that framework commit cannot adopt; fetch one that can"
+    done
+    python3 "$prog/adopt.py" "${aargs[@]}" </dev/null || die "adoption stopped — see above"
+    [ "$dry" = 0 ] || exit 0
+    if [ "$sync" = 1 ]; then
+      out=$(scripts/packs.sh sync) || after_merge "adopted, but scripts/packs.sh sync failed — fix what it reports, then re-run it"
+      printf '%s\n' "$out" | sed 's/^/  /'
+    fi
+    if command -v python3 >/dev/null 2>&1 && python3 -c 'import yaml' 2>/dev/null; then
+      python3 scripts/validate_framework.py >/dev/null 2>&1 \
+        || after_merge "adopted, but the framework self-check fails — run: python3 scripts/validate_framework.py"
+      say "  framework self-check: ok"
+    fi
+    dirty=$(new_dirt)
+    [ -z "$dirty" ] || after_merge "adopted, but this run left new changes in the working tree:"$'\n'"$dirty"
+    say "done — adopted; from now on scripts/upgrade.sh is an ordinary merge"
+    say "  enable the hooks once per clone: git config core.hooksPath .githooks"
+    exit 0
+  fi
+fi
 
 # --- 1. core integrity: has this instance edited a framework path? ----------------------
 # Framework paths = what the framework tracks at the merge base (or at the target, for an
@@ -116,10 +205,23 @@ else
       # Every conflict here is add/add on a framework path whose two sides differ only by
       # the framework's own later changes (integrity passed above), so the framework's
       # version is the right one. An instance path cannot conflict: the framework tracks none.
+      # A path is the framework's if the framework tracks it or a file below it. A symlink or
+      # a file where the framework has a folder conflicts under a renamed path: git parks
+      # that side as <path>~HEAD (or <path>~<remote>_<branch>), so the suffix is stripped.
       conflicted=$(git diff --name-only --diff-filter=U)
-      bad=$(printf '%s\n' "$conflicted" | grep -vxF -f <(git ls-tree -r --name-only "$new") || true)
+      fw_paths=$(git ls-tree -r --name-only "$new")
+      parked="~${target//\//_}"
+      real_path() { local p="${1%~HEAD}"; printf '%s' "${p%"$parked"}"; }
+      is_fw() { printf '%s\n' "$fw_paths" | awk -v p="$1" '$0 == p || index($0, p "/") == 1 { f = 1; exit } END { exit !f }'; }
+      bad=$(printf '%s\n' "$conflicted" | while IFS= read -r c; do [ -z "$c" ] || is_fw "$(real_path "$c")" || echo "$c"; done)
       if [ -n "$bad" ]; then git merge --abort; die "conflicts outside the framework paths — resolve by hand:"$'\n'"$bad"; fi
-      printf '%s\n' "$conflicted" | while IFS= read -r p; do [ -n "$p" ] && git checkout -q --theirs -- "$p" && git add -- "$p"; done
+      printf '%s\n' "$conflicted" | while IFS= read -r c; do
+        [ -n "$c" ] || continue
+        p=$(real_path "$c")
+        git rm -q -r --cached --ignore-unmatch -- "$c" "$p" >/dev/null
+        rm -rf -- "$c" "$p"
+        git checkout -q "$new" -- "$p"
+      done
       git commit -q --no-edit
       say "  resolved $(printf '%s\n' "$conflicted" | grep -c .) framework path(s) to the framework's version (first merge of unrelated histories)"
     fi
@@ -137,13 +239,18 @@ MSG
 fi
 
 # --- 4. rebuild the generated links ------------------------------------------------------------
-if [ "$sync" = 1 ]; then scripts/packs.sh sync | sed 's/^/  /'; fi
+if [ "$sync" = 1 ]; then
+  out=$(scripts/packs.sh sync) || after_merge "merged, but scripts/packs.sh sync failed — fix what it reports, then re-run it"
+  printf '%s\n' "$out" | sed 's/^/  /'
+fi
 
 # --- 5. self-check (framework paths only in an instance) ------------------------------------------
 if command -v python3 >/dev/null 2>&1 && python3 -c 'import yaml' 2>/dev/null; then
   if python3 scripts/validate_framework.py >/dev/null 2>&1; then say "  framework self-check: ok"
   else say "  framework self-check reports problems — run: python3 scripts/validate_framework.py"; fi
 fi
+dirty=$(new_dirt)
+[ -z "$dirty" ] || after_merge "the upgrade left new changes in the working tree — inspect them before committing:"$'\n'"$dirty"
 
 # --- 6. record the reviewed template ref ------------------------------------------------------------
 if [ "$ack" = 1 ]; then

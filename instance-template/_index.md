@@ -18,6 +18,7 @@ instance.
 | `root/projects/` · `root/memory/` · `root/automations/` · `root/vaults/` | The instance folders, each with its `_index.md`: registry, `raw → wiki → output`, routine rows, federated vaults. |
 | `root/meta-os.config.json` | The estate config ([[systems/config]]) with the `instance` block bootstrap fills in. |
 | `root/.packs.yaml` | The declared-packs manifest `scripts/packs.sh apply` reconciles to ([[systems/packs]]). |
+| `root/.githooks.d/` · `root/.gitignore.instance` | The instance's **extension points** for git hooks and root-level ignore rules: the framework's `.githooks/` and `.gitignore` are framework files an upgrade replaces ([[systems/distribution]], "Extension points"). |
 | `root/.obsidian/` | Obsidian vault settings: attachments under `memory/raw/attachments`, daily notes under `memory/raw/daily`, templates from `templates/`, graph colour groups per folder. |
 
 ## The two rules this folder encodes

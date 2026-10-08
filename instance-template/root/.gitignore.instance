@@ -1,0 +1,5 @@
+# This instance's own ignore rules. The root .gitignore is the framework's: an upgrade
+# replaces it, so instance rules live here. Same syntax as a root .gitignore;
+# scripts/packs.sh sync (run by bootstrap, upgrade and apply) copies them into
+# $GIT_DIR/info/exclude. A rule for one of the instance's own folders can live in a
+# .gitignore inside that folder instead — git reads those natively, in every clone.

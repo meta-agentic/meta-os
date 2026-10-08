@@ -68,6 +68,13 @@ jobs:
       - name: Install validator dependencies
         run: python -m pip install --disable-pip-version-check --quiet ${{ env.PIP_PACKAGES }}
 
+      # Inside an instance the gate judges only the paths the framework tracks at the
+      # commit last merged, which it reads from `upstream/main`. A CI checkout has neither
+      # that remote nor the history, so without this step the gate guesses the scope and
+      # judges the instance's own files. In the framework repository itself it does nothing.
+      - name: Framework ref for the gate (instances only)
+        run: python scripts/ci_framework_ref.py
+
       - name: Framework self-check
         run: python scripts/validate_framework.py
 
@@ -114,6 +121,9 @@ jobs:
 
       - name: Install validator dependencies
         run: python -m pip install --disable-pip-version-check --quiet ${{ env.PIP_PACKAGES }}
+
+      - name: Framework ref for the gate (instances only)
+        run: python scripts/ci_framework_ref.py
 
       - name: Framework self-check (--strict)
         id: framework

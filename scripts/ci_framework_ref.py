@@ -13,6 +13,10 @@ framework's. This prepares the checkout the way a clone already is:
 
   * the framework repository itself (no tracked `.claude/CLAUDE.md`): nothing to do,
     and nothing is fetched;
+  * the framework repository tracking `.claude/CLAUDE.md` anyway (its `origin`, or
+    `$GITHUB_REPOSITORY`, is the framework it would add as `upstream`): refused. Acting
+    as an instance there would scope the gate to `main` and let every file a change adds
+    escape it, and skip every test suite;
   * an instance: a shallow checkout is deepened to its full history, an `upstream`
     remote is added (an existing one is kept as it is), its `main` is fetched, and the
     merge base with `HEAD` must resolve. If it does not, this fails rather than letting
@@ -24,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -31,6 +36,30 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 CANONICAL_URL = "https://github.com/meta-agentic/meta-os.git"
 REMOTE, BRANCH = "upstream", "main"
+
+
+def normalise_url(url: str) -> str:
+    """A repository URL compared by what it names: no scheme, user, case, `.git` or `/` at the end.
+
+    `https://github.com/O/R.git`, `git@github.com:O/R` and `ssh://git@github.com/O/R/` all
+    give `github.com/o/r`; `file:///p` and `/p` give `/p`.
+    """
+    u = url.strip().lower()
+    u = re.sub(r"^[^/@:]+@([^:/]+):", r"\1/", u)    # scp-like: git@host:path
+    u = re.sub(r"^[a-z][a-z0-9+.-]*://", "", u)      # https:// ssh:// file:// git://
+    u = re.sub(r"^[^/@]+@", "", u)                     # user@host
+    u = u.rstrip("/")
+    return (u[:-4] if u.endswith(".git") else u).rstrip("/")
+
+
+def is_the_framework(url: str) -> bool:
+    """Is this checkout the framework at `url` itself, by its origin or by CI's repository name?"""
+    target = normalise_url(url)
+    origin = git("remote", "get-url", "origin", check=False)
+    if origin.returncode == 0 and normalise_url(origin.stdout) == target:
+        return True
+    slug = os.environ.get("GITHUB_REPOSITORY", "").strip().lower()
+    return bool(slug) and target == f"github.com/{slug}"
 
 
 def git(*args: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -52,6 +81,11 @@ def main(argv: list[str] | None = None) -> int:
     if not is_instance():
         print("ci_framework_ref: the framework repository itself — the gate's scope needs no ref")
         return 0
+    if is_the_framework(a.url):
+        print(f"ci_framework_ref: this is the framework repository ({a.url}) and it tracks an "
+              "instance path (.claude/CLAUDE.md) — refusing to scope its gate as an instance's; "
+              "remove the file", file=sys.stderr)
+        return 1
 
     try:
         if git("rev-parse", "--is-shallow-repository").stdout.strip() == "true":

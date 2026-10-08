@@ -13,11 +13,14 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 import yaml
+
+from test_instance_lifecycle import working_tree_files
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "ci_framework_ref.py"
@@ -129,6 +132,33 @@ class CiFrameworkRefTest(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stdout)
         self.assertIn("failed", r.stderr)
 
+    def test_the_framework_repository_tracking_the_contract_is_refused(self):
+        # a change to the framework that commits .claude/CLAUDE.md must not pass as an instance
+        commit(self.fw, {".claude/CLAUDE.md": "# not an instance\n"}, "tracks the contract")
+        ci = self.ci_checkout(self.fw)
+        for args, env in ((("--url", f"file://{self.fw}"), {}),                 # origin is the framework
+                          (("--url", "https://github.com/Meta-Agentic/meta-os/"),  # CI names it
+                           {"GITHUB_REPOSITORY": "meta-agentic/meta-os"})):
+            with self.subTest(args=args):
+                r = self.script(ci, *args, env=env)
+                self.assertEqual(r.returncode, 1, r.stdout)
+                self.assertIn("this is the framework repository", r.stderr)
+                self.assertNotIn("upstream", git(ci, "remote"))
+
+    def test_urls_are_compared_by_what_they_name(self):
+        sys.path.insert(0, str(ROOT / "scripts"))
+        try:
+            from ci_framework_ref import normalise_url
+        finally:
+            sys.path.pop(0)
+        same = ["https://github.com/meta-agentic/meta-os.git", "https://github.com/Meta-Agentic/meta-os/",
+                "git@github.com:meta-agentic/meta-os.git", "ssh://git@github.com/meta-agentic/meta-os",
+                "https://x-access-token@github.com/meta-agentic/meta-os"]
+        self.assertEqual({normalise_url(u) for u in same}, {"github.com/meta-agentic/meta-os"})
+        self.assertEqual(normalise_url("file:///srv/fw/"), normalise_url("/srv/fw"))
+        self.assertNotEqual(normalise_url("https://github.com/someone/meta-os"),
+                            normalise_url("https://github.com/meta-agentic/meta-os"))
+
     def test_both_gate_jobs_prepare_the_ref_before_the_framework_gate(self):
         jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
         for job in ("gates", "debt"):
@@ -138,6 +168,53 @@ class CiFrameworkRefTest(unittest.TestCase):
                 gate = [i for i, r in enumerate(runs) if "scripts/validate_framework.py" in r]
                 self.assertTrue(prep and gate, runs)
                 self.assertLess(prep[0], gate[0])
+
+
+
+class FrameworkGateNeverNarrowsInItsOwnRepository(unittest.TestCase):
+    """The gate's own guard, independent of the CI step: in the framework repository a
+    tracked `.claude/CLAUDE.md` and a reachable `upstream/main` still leave a leak in a new
+    file caught, and the tracked contract refused. Built from this working tree."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="metaos-ownfw-"))
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.fw = self.tmp / "framework"
+        for rel in working_tree_files():
+            src, dst = ROOT / rel, self.fw / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if src.is_symlink():
+                dst.symlink_to(os.readlink(src))
+            elif src.is_file():
+                shutil.copy2(src, dst)
+        git(self.fw, "init", "-q", "-b", "main")
+        git(self.fw, "add", "-A")
+        git(self.fw, "commit", "-q", "-m", "framework")
+
+    def change_with_contract_and_leak(self, origin: str) -> Path:
+        pr = self.tmp / "pr"
+        git(self.tmp, "clone", "-q", str(self.fw), str(pr))
+        git(pr, "remote", "set-url", "origin", origin)
+        git(pr, "remote", "add", "upstream", str(self.fw))
+        git(pr, "fetch", "-q", "upstream")
+        key, home = "AB" + "C-12" + "3", "/Us" + "ers/" + "someone/notes"   # never committed here
+        commit(pr, {".claude/CLAUDE.md": "# not an instance\n",
+                    "systems/new-note.md": f"---\ntype: note\n---\nsee {key} in {home}\n"}, "change")
+        return pr
+
+    def test_a_leak_in_a_new_file_is_still_caught_and_every_suite_still_runs(self):
+        for origin in ("https://github.com/meta-agentic/meta-os.git",   # the canonical framework
+                       None):                                           # upstream is origin itself
+            with self.subTest(origin=origin):
+                shutil.rmtree(self.tmp / "pr", ignore_errors=True)
+                pr = self.change_with_contract_and_leak(origin or str(self.fw))
+                gate = run(["python3", "scripts/validate_framework.py"], pr)
+                self.assertNotEqual(gate.returncode, 0, gate.stdout)
+                self.assertIn("systems/new-note.md", gate.stdout)
+                self.assertIn("instance-path-tracked", gate.stdout)
+                self.assertNotIn("instance: checking the framework's paths", gate.stdout)
+                listed = run(["python3", "scripts/run_tests.py", "--list"], pr)
+                self.assertEqual(listed.stdout.split(), ["pipeline/tests", "tests"], listed.stderr)
 
 
 if __name__ == "__main__":

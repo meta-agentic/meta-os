@@ -171,7 +171,7 @@ else
       fw_paths=$(git ls-tree -r --name-only "$new")
       parked="~${target//\//_}"
       real_path() { local p="${1%~HEAD}"; printf '%s' "${p%"$parked"}"; }
-      is_fw() { printf '%s\n' "$fw_paths" | grep -qxF -- "$1" || printf '%s\n' "$fw_paths" | grep -qF -- "$1/"; }
+      is_fw() { printf '%s\n' "$fw_paths" | awk -v p="$1" '$0 == p || index($0, p "/") == 1 { f = 1; exit } END { exit !f }'; }
       bad=$(printf '%s\n' "$conflicted" | while IFS= read -r c; do [ -z "$c" ] || is_fw "$(real_path "$c")" || echo "$c"; done)
       if [ -n "$bad" ]; then git merge --abort; die "conflicts outside the framework paths — resolve by hand:"$'\n'"$bad"; fi
       printf '%s\n' "$conflicted" | while IFS= read -r c; do

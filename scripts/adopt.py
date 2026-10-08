@@ -214,7 +214,8 @@ def report(plan: Plan, target: str, short: str) -> None:
     for src, dest in plan.hooks:
         say(f"  hook moved: {src} -> {dest} (the framework's {src} runs it)")
     if plan.ignore_drop_file:
-        say(f"  ignore rules: {len(plan.ignore_moved)} instance rule(s) of {GITIGNORE} -> {INSTANCE_IGNORE}"
+        n = sum(1 for r in plan.ignore_moved if not r.lstrip().startswith("#"))
+        say(f"  ignore rules: {n} instance rule(s) of {GITIGNORE}, with their comments -> {INSTANCE_IGNORE}"
             f" (scripts/packs.sh sync applies them)")
         for r in plan.ignore_moved:
             say(f"    moved:    {r}")

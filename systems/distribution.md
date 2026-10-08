@@ -110,7 +110,12 @@ Generic tool artefacts are not instance rules: the framework's `.gitignore` itse
 
 ## Adopting an existing instance
 
-A repository can be an instance of the OS before it has the framework's history: an older layout kept the framework in a sibling checkout and mounted its folders as symlinks, kept the instance contract in the root `CLAUDE.md`, vendored `scripts/packs.sh`, and carried its own hooks and ignore lines in the framework's files. `scripts/upgrade.sh` cannot take such a repository as it is — it is not bootstrapped (no `.claude/CLAUDE.md`), it shares no history with the framework, and its first merge would meet a symlink where the framework has a folder. Adoption is the one-time step that makes it an ordinary instance, run with the copy of the script on the fetched framework, since the instance does not carry it yet:
+A repository can be an instance of the OS before it has the framework's history. Two older layouts are adopted the same way:
+
+- **Sibling checkout.** The framework sits in a checkout next to the instance, and the instance mounts its folders as symlinks (`systems -> ../meta-os/systems`).
+- **Template repository.** The instance was created from the retired instance template and carries the framework as a git submodule (`.meta-os`). Its framework folders are symlinks into that submodule, and the discovery links in `skills/` and `.claude/skills/` are committed.
+
+In both, the instance contract is the root `CLAUDE.md`, `scripts/packs.sh` is a vendored copy, and the instance's own hooks and ignore lines live in the framework's files. `scripts/upgrade.sh` cannot take such a repository as it is — it is not bootstrapped (no `.claude/CLAUDE.md`), it shares no history with the framework, and its first merge would meet a symlink where the framework has a folder. Adoption is the one-time step that makes it an ordinary instance, run with the copy of the script on the fetched framework, since the instance does not carry it yet:
 
 ```bash
 git remote get-url upstream || git remote add upstream https://github.com/meta-agentic/meta-os.git
@@ -132,7 +137,8 @@ flowchart TD
     D -- yes --> X0[refuse]
     D -- no --> P[plan every path the framework tracks, on disk and in HEAD]
     P --> C[contract: root CLAUDE.md moves to .claude/CLAUDE.md, or the template's is instantiated]
-    P --> M[symlink into a framework checkout's same folder, or dangling: mount removed]
+    P --> M[symlink into a framework checkout's same path, or dangling: mount removed]
+    P --> SM[framework submodule and committed discovery links: removed, lost skills listed]
     P --> H[instance hook the framework dispatches: moved to .githooks.d/hook/]
     P --> I[instance-only .gitignore rules: moved to .gitignore.instance]
     P --> Z[untracked copy identical to the framework's: removed]
@@ -142,22 +148,27 @@ flowchart TD
     R --> Y{--yes?}
     Y -- no --> X2[refuse, nothing changed]
     Y -- yes --> BK[tracked: kept in the pre-adoption commit; untracked: backed up]
-    C & M & H & I & Z & BK --> K[one preparatory commit]
+    C & M & SM & H & I & Z & BK --> K[one preparatory commit]
     K --> G[merge --allow-unrelated-histories: no conflict is possible]
     K -. any failure .-> RB[roll back: HEAD, index, links and backups restored]
     G -. any failure .-> RB
     G --> S[packs.sh sync applies .gitignore.instance and the links; the gate runs]
+    S --> T{gate green and no new dirt?}
+    T -- yes --> DONE[done]
+    T -- no --> E[error, never done]
 ```
 
-`scripts/adopt.py` does the work, reading every path the framework tracks at `upstream/main` against the instance's `HEAD` and its working tree:
+`scripts/adopt.py` does the work (`scripts/adopt_plan.py` is its read-only planner), reading every path the framework tracks at `upstream/main` against the instance's `HEAD` and its working tree:
 
 - **The instance contract.** A root `CLAUDE.md` that is not the framework's moves to `.claude/CLAUDE.md` (a symlinked one is recreated there as a link to the same file); an instance without one gets the template's, filled in.
-- **Mounts.** A symlink where the framework has a *folder*, leading into a framework checkout's folder of the same name (or dangling) — tracked (a whole framework folder linked from a sibling checkout) or generated and untracked (a skill link of the older layout) — is removed; the framework's real folder takes its place. A link to anything else (a private folder of the instance's own) is instance content and is listed like any other replacement.
+- **Mounts.** A symlink at a framework path that leads into a framework checkout's file or folder of the same name, or that leads nowhere, is removed, and the framework's own takes its place. This covers a whole framework folder linked from a sibling checkout or from the submodule, a committed `skills/<name>` link into the framework's skill, and a generated, untracked skill link. A link to anything else, such as a private folder of the instance's own, is instance content and is listed like any other replacement.
+- **The framework as a submodule.** A submodule whose URL is the framework's (the public repository or the `upstream` remote), or whose checkout is a framework checkout, is the old framework mount. Its gitlink and `.gitmodules` section go in the preparatory commit. Once merged, its checkout, its module git directory and its local config section are removed. A copy with local commits or uncommitted changes needs `--yes` and is kept in the backup folder instead.
+- **Committed discovery links.** Links committed into `skills/` or `.claude/{skills,agents,hooks}/` are what `scripts/packs.sh sync` generates now, never committed, so they are untracked. The plan names each skill that discovery will no longer find, because the current framework no longer ships it and no mounted pack provides it. To keep one, mount a pack that carries it, or copy it in as a real folder in `skills/`, which makes it the instance's own.
 - **Hooks and ignores** move to the extension points above; a symlinked hook moves as a link to the same target, a symlinked `.gitignore` is read through the link. An ignore rule that would match framework files (the older layout's ignored, generated `skills/`, say) is kept in `.gitignore.instance` commented out, with the reason, not dropped.
 - **Everything else at a framework path whose content differs** — a vendored copy of a framework script, the instance's own `README.md`, an untracked file where a framework file will land — is listed before anything happens, and the adoption refuses unless `--yes`: move what you want to keep to an instance path or an extension point first, then re-run. With `--yes` the framework's version wins; tracked content stays in the pre-adoption commit (the output names it), untracked content is backed up under `$GIT_DIR/meta-os-adopt/`.
 - **A path that differs from a framework path only by case** (`readme.md` against `README.md`) is refused outright when git runs case-insensitively (`core.ignorecase`, the macOS default): the disk holds one file for both names. Rename it, commit, re-run.
 
-The changes are one preparatory commit; then the framework is merged with `--allow-unrelated-histories`. That merge cannot conflict — every path the framework tracks is now absent from the instance or identical to the framework's — so the instance's own paths come through it untouched. Both commits are made without hooks (the gate runs explicitly after the merge). If anything fails on the way — a commit a signing setup refuses, a merge git cannot start — the run rolls back on its own: HEAD and the index return to the pre-adoption commit, removed links and identical copies are recreated, backed-up files are moved back, and a re-run starts clean. After a successful run, `git reset --hard <pre-adoption commit>`, printed by the run, undoes the whole adoption. From then on there is a merge base, and `scripts/upgrade.sh` is an ordinary upgrade.
+The run ends with an error, never with "done", if the fetched framework commit lacks the adoption scripts, if `scripts/packs.sh sync` or the framework gate fails, or if the run left the working tree dirtier than it found it. The changes are one preparatory commit; then the framework is merged with `--allow-unrelated-histories`. That merge cannot conflict — every path the framework tracks is now absent from the instance or identical to the framework's — so the instance's own paths come through it untouched. Both commits are made without hooks (the gate runs explicitly after the merge). If anything fails on the way — a commit a signing setup refuses, a merge git cannot start — the run rolls back on its own: HEAD and the index return to the pre-adoption commit, removed links and identical copies are recreated, backed-up files are moved back, and a re-run starts clean. After a successful run, `git reset --hard <pre-adoption commit>`, printed by the run, undoes the whole adoption. From then on there is a merge base, and `scripts/upgrade.sh` is an ordinary upgrade.
 
 ## Why one repository — and what changed since it was rejected
 

@@ -62,6 +62,10 @@ done
 
 root=$(git rev-parse --show-toplevel 2>/dev/null) || die "not inside a git checkout"
 cd "$root"
+# "done" is never printed over a tree this run left dirty: what git status shows at the
+# end must be what it showed at the start, or less.
+status_before=$(git status --porcelain)
+new_dirt() { git status --porcelain | grep -vxF -f <(printf '%s\n' "$status_before") || true; }
 target="$remote/$branch"
 if [ ! -f .claude/CLAUDE.md ] && [ "$adopt" = 0 ]; then
   cat >&2 <<MSG
@@ -108,14 +112,28 @@ if [ "$adopt" = 1 ]; then
     command -v python3 >/dev/null 2>&1 || die "--adopt needs python3"
     aargs=(--target "$target"); [ "$dry" = 0 ] || aargs+=(--dry-run); [ "$yes" = 0 ] || aargs+=(--yes)
     # Read from the fetched framework, not the working tree: the instance may not carry it yet.
-    # stdin stays the caller's (this script may itself be arriving on it).
-    python3 <(git show "$target:scripts/adopt.py") "${aargs[@]}" </dev/null || exit 1
+    # Written to a file first, so a framework that lacks it stops here instead of handing
+    # python an empty program (which "succeeds"). stdin stays the caller's: this script
+    # may itself be arriving on it.
+    prog=$(mktemp -d "${TMPDIR:-/tmp}/meta-os-adopt.XXXXXX")
+    trap 'rm -rf "$prog"' EXIT
+    for f in adopt.py adopt_plan.py; do
+      git show "$target:scripts/$f" > "$prog/$f" 2>/dev/null \
+        || die "$target has no scripts/$f — that framework commit cannot adopt; fetch one that can"
+    done
+    python3 "$prog/adopt.py" "${aargs[@]}" </dev/null || die "adoption stopped — see above"
     [ "$dry" = 0 ] || exit 0
-    if [ "$sync" = 1 ]; then scripts/packs.sh sync | sed 's/^/  /'; fi
-    if command -v python3 >/dev/null 2>&1 && python3 -c 'import yaml' 2>/dev/null; then
-      if python3 scripts/validate_framework.py >/dev/null 2>&1; then say "  framework self-check: ok"
-      else say "  framework self-check reports problems — run: python3 scripts/validate_framework.py"; fi
+    if [ "$sync" = 1 ]; then
+      out=$(scripts/packs.sh sync) || die "merged, but scripts/packs.sh sync failed — fix what it reports, then re-run it"
+      printf '%s\n' "$out" | sed 's/^/  /'
     fi
+    if command -v python3 >/dev/null 2>&1 && python3 -c 'import yaml' 2>/dev/null; then
+      python3 scripts/validate_framework.py >/dev/null 2>&1 \
+        || die "merged, but the framework self-check fails — run: python3 scripts/validate_framework.py"
+      say "  framework self-check: ok"
+    fi
+    dirty=$(new_dirt)
+    [ -z "$dirty" ] || die "merged, but this run left the working tree dirty — inspect before committing:"$'\n'"$dirty"
     say "done — adopted; from now on scripts/upgrade.sh is an ordinary merge"
     say "  enable the hooks once per clone: git config core.hooksPath .githooks"
     exit 0
@@ -214,7 +232,12 @@ MSG
 fi
 
 # --- 4. rebuild the generated links ------------------------------------------------------------
-if [ "$sync" = 1 ]; then scripts/packs.sh sync | sed 's/^/  /'; fi
+if [ "$sync" = 1 ]; then
+  out=$(scripts/packs.sh sync) || die "merged, but scripts/packs.sh sync failed — fix what it reports, then re-run it"
+  printf '%s\n' "$out" | sed 's/^/  /'
+fi
+dirty=$(new_dirt)
+[ -z "$dirty" ] || die "the upgrade left the working tree dirty — inspect before committing:"$'\n'"$dirty"
 
 # --- 5. self-check (framework paths only in an instance) ------------------------------------------
 if command -v python3 >/dev/null 2>&1 && python3 -c 'import yaml' 2>/dev/null; then

@@ -42,20 +42,31 @@ def git(cwd: Path, *args: str) -> str:
                           text=True, timeout=60, env={**os.environ, **GIT_ENV}).stdout
 
 
-class PacksShTest(unittest.TestCase):
+class PacksShFixture(unittest.TestCase):
+    """The throwaway instance and its local pack repositories; no cases of its own.
+
+    A subclass changes the packs with `PACKS` and a pack's manifest with `pack_yaml`.
+    """
+
+    PACKS = PACKS
+
+    def pack_yaml(self, name: str) -> str | None:
+        """The pack's pack.yaml, or None for a pack that ships none."""
+        return (f"name: {name}\nversion: 0.1.0\ndescription: fixture\nconfig:\n"
+                "  profile:\n    default: light\n    one_of: light | full\n    doc: \"the profile\"\n")
 
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp(prefix="metaos-packs-"))
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.urls = {}
-        for name, skills in PACKS.items():
+        for name, skills in self.PACKS.items():
             repo = self.tmp / "src" / name
             for s in skills:
                 (repo / "skills" / s).mkdir(parents=True)
                 (repo / "skills" / s / "SKILL.md").write_text(f"---\nname: {s}\n---\n")
-            (repo / "pack.yaml").write_text(
-                f"name: {name}\nversion: 0.1.0\ndescription: fixture\nconfig:\n"
-                "  profile:\n    default: light\n    one_of: light | full\n    doc: \"the profile\"\n")
+            pack_yaml = self.pack_yaml(name)
+            if pack_yaml is not None:
+                (repo / "pack.yaml").write_text(pack_yaml)
             git(repo, "init", "-q", "-b", "main")
             git(repo, "add", ".")
             git(repo, "commit", "-q", "-m", "init")
@@ -86,6 +97,15 @@ class PacksShTest(unittest.TestCase):
 
     def links(self) -> dict[str, str]:
         return {p.name: os.readlink(p) for p in (self.inst / "skills").iterdir() if p.is_symlink()}
+
+    def mount_and_commit(self, *names: str):
+        self.manifest(*(names or ("alpha",)))
+        self.packs("apply")
+        git(self.inst, "add", ".gitmodules", ".packs", ".packs.yaml")
+        git(self.inst, "commit", "-q", "-m", "mount")
+
+
+class PacksShTest(PacksShFixture):
 
     # --- mount model --------------------------------------------------------------------
 
@@ -163,12 +183,6 @@ class PacksShTest(unittest.TestCase):
         self.packs("apply")
         self.assertIn("mounts match", self.packs("check").stdout)
 
-    def mount_and_commit(self, *names: str):
-        self.manifest(*(names or ("alpha",)))
-        self.packs("apply")
-        git(self.inst, "add", ".gitmodules", ".packs", ".packs.yaml")
-        git(self.inst, "commit", "-q", "-m", "mount")
-
     def test_pack_names_are_validated_before_they_become_paths(self):
         self.mount_and_commit("alpha", "beta")
         for cmd in (("remove", "alpha/.."), ("remove", "../x"), ("remove", "a b"),
@@ -229,6 +243,90 @@ class PacksShTest(unittest.TestCase):
         r = run("remove", "beta")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertFalse(gd.exists(), "the worktree's module gitdir must go with the pack")
+
+    def test_an_uninitialised_submodule_is_refused_then_apply_initialises_it(self):
+        # what a fresh clone or a new worktree holds: the pin recorded, the folder empty
+        self.mount_and_commit()
+        git(self.inst, "submodule", "deinit", "-q", "-f", ".packs/alpha")
+        self.assertEqual(list((self.inst / ".packs" / "alpha").iterdir()), [])
+        for cmd in ("check", "sync"):
+            with self.subTest(cmd=cmd):
+                r = self.packs(cmd, check=False)
+                self.assertNotEqual(r.returncode, 0, r.stdout)
+                self.assertIn("dangling mount: .packs/alpha is empty", r.stderr)
+        out = self.packs("apply").stdout
+        self.assertIn("initialising 'alpha'", out)
+        self.assertTrue((self.inst / "skills" / "alpha-one" / "SKILL.md").is_file())
+        self.assertIn("mounts match", self.packs("check").stdout)
+
+    def test_a_dangling_skill_link_is_refused_by_check(self):
+        self.manifest("alpha")
+        self.packs("apply")
+        (self.inst / "skills" / "alpha-old").symlink_to("/nonexistent/alpha-old")
+        r = self.packs("check", check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("dangling mount: skills/alpha-old", r.stderr)
+
+    def test_check_refuses_a_declared_pack_that_is_not_mounted(self):
+        self.manifest("alpha")
+        self.packs("apply")
+        with (self.inst / ".packs.yaml").open("a") as fh:
+            fh.write("  ghost:\n    repo: /nowhere\n")
+        r = self.packs("check", check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("declared but not mounted: ghost", r.stderr)
+
+    def test_apply_fails_when_a_declared_pack_cannot_mount(self):
+        self.manifest("alpha")
+        with (self.inst / ".packs.yaml").open("a") as fh:
+            fh.write(f"  ghost:\n    repo: {self.tmp / 'no-such-repo'}\n")
+        r = self.packs("apply", check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("not mounted: ghost", r.stderr)
+        self.assertNotIn("state matches", r.stdout)
+        self.assertTrue((self.inst / "skills" / "alpha-one").is_symlink(), "the other packs still mount")
+
+    def test_update_stages_the_bump_so_apply_keeps_it(self):
+        self.mount_and_commit()
+        src = Path(self.urls["alpha"])
+        (src / "CHANGELOG").write_text("bump\n")
+        git(src, "add", ".")
+        git(src, "commit", "-q", "-m", "bump")
+        new = git(src, "rev-parse", "HEAD").strip()
+        self.packs("update", "alpha")
+        self.assertIn(".packs/alpha", git(self.inst, "diff", "--cached", "--name-only"))
+        self.assertIn("mounts match", self.packs("check").stdout)
+        self.packs("apply")
+        self.assertEqual(git(self.inst / ".packs" / "alpha", "rev-parse", "HEAD").strip(), new)
+
+    # --- the union of skills/ ----------------------------------------------------------
+
+    def test_check_refuses_a_union_link_with_a_wrong_target_until_sync(self):
+        self.manifest("alpha")
+        self.packs("apply")
+        link = self.inst / "skills" / "alpha-two"
+        link.unlink()
+        link.symlink_to("../.packs/alpha/skills/alpha-one")    # resolves, but to the wrong skill
+        r = self.packs("check", check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("pack links are stale", r.stderr)
+        self.packs("sync")
+        self.assertEqual(os.readlink(link), "../.packs/alpha/skills/alpha-two")
+        self.assertIn("mounts match", self.packs("check").stdout)
+
+    def test_an_instance_owned_skill_shadows_a_pack_skill_and_check_passes(self):
+        self.manifest("alpha")
+        self.packs("apply")
+        own = self.inst / "skills" / "alpha-one"
+        own.unlink()
+        own.mkdir()
+        (own / "SKILL.md").write_text("---\nname: alpha-one\n---\nthe instance's own\n")
+        r = self.packs("sync")
+        self.assertIn("shadowed by the real skills/alpha-one", r.stderr)
+        self.assertFalse(own.is_symlink())
+        self.assertIn("the instance's own", (own / "SKILL.md").read_text())
+        self.assertNotIn("/skills/alpha-one", (self.inst / ".git" / "info" / "exclude").read_text())
+        self.assertIn("mounts match", self.packs("check").stdout)
 
     # --- the instance's ignore rules -----------------------------------------------------
 

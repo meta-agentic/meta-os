@@ -128,7 +128,8 @@ while IFS= read -r rel; do
     fi
   fi
 done < <(cd "$TEMPLATE" && find . \( -type f -o -type l \) | LC_ALL=C sort)
-say "  created $created, kept $kept already present"
+if [ "$dry" = 1 ]; then say "  would create $created, kept $kept already present"
+else say "  created $created, kept $kept already present"; fi
 if [ "$local_mode" = 1 ] && [ "$dry" = 0 ]; then
   ex=$(git rev-parse --git-path info/exclude); mkdir -p "$(dirname "$ex")"; [ -f "$ex" ] || : > "$ex"
   marker="# >>> meta-os scripts/bootstrap.sh --local — instance files of a developer checkout >>>"
@@ -210,7 +211,8 @@ fi
 
 # --- done ---------------------------------------------------------------------------------------
 say ""
-if [ "$bootstrapped" = 1 ] && [ "$created" = 0 ]; then say "Already bootstrapped — nothing changed."; else say "Instance '$name' is live."; fi
+if [ "$dry" = 1 ]; then say "Dry run — nothing was written. Re-run without --dry-run to instantiate '$name'."; exit 0
+elif [ "$bootstrapped" = 1 ] && [ "$created" = 0 ]; then say "Already bootstrapped — nothing changed."; else say "Instance '$name' is live."; fi
 say "Next:"
 say "  - open $root as your Obsidian vault; start at _index.md"
 say "  - in Claude Code, run the bootstrap-instance skill for the guided first conversation"

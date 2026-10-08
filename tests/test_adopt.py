@@ -30,6 +30,7 @@ from pathlib import Path
 import test_instance_lifecycle as lifecycle
 from test_instance_lifecycle import GIT_ENV, git, run
 
+CANONICAL = "https://github.com/meta-agentic/meta-os.git"
 KEY = "AB" + "C-" + "42"            # a tracker-key lookalike, assembled so this file carries none
 
 
@@ -369,58 +370,6 @@ class AdoptTest(lifecycle.LifecycleTest):
         self.assertNotEqual(r.returncode, 0, r.stdout)
         self.assertIn("scripts/new_tool.py:1", r.stdout)
 
-
-    # --- the template layout: the framework as a submodule ---------------------------------
-
-    def make_template_instance(self) -> Path:
-        old = self.tmp / "old-framework"                     # the framework as the template pinned it
-        git(self.tmp, "clone", "-q", str(self.upstream), str(old))
-        self.write(old, "skills/old-skill/SKILL.md", "---\nname: old-skill\ndescription: retired\n---\n")
-        git(old, "add", "-A"); git(old, "commit", "-q", "-m", "a skill the framework later dropped")
-        inst = self.tmp / "tmpl"
-        self.write(inst, "CLAUDE.md", "# tmpl — the instance contract\n")
-        self.write(inst, "memory/wiki/note.md", "a note\n")
-        git(inst, "init", "-q", "-b", "main")
-        git(inst, "-c", "protocol.file.allow=always", "submodule", "add", "-q", str(old), ".meta-os")
-        for name in ("agents", "systems", "templates"):
-            (inst / name).symlink_to(Path(".meta-os") / name)
-        (inst / "skills").mkdir()
-        (inst / ".claude" / "skills").mkdir(parents=True)
-        for name in ("graphify", "old-skill", "_index.md"):
-            (inst / "skills" / name).symlink_to(Path("..") / ".meta-os" / "skills" / name)
-        for name in ("graphify", "old-skill"):
-            (inst / ".claude" / "skills" / name).symlink_to(Path("..") / ".." / "skills" / name)
-        git(inst, "add", "-A"); git(inst, "commit", "-q", "-m", "from the instance template")
-        git(inst, "remote", "add", "upstream", str(self.upstream))
-        git(inst, "fetch", "-q", "upstream")
-        (inst / "scratch.txt").write_text("the operator's untracked file\n")   # not the adoption's dirt
-        return inst
-
-    def test_the_template_layout_drops_the_framework_submodule_and_its_committed_links(self):
-        inst = self.make_template_instance()
-        out = self.adopt(inst, "--dry-run").stdout
-        self.assertIn("framework submodule removed: .meta-os", out)
-        self.assertIn("mount removed: skills/graphify -> ../.meta-os/skills/graphify", out)
-        self.assertIn("mount removed: skills/_index.md", out)
-        self.assertIn("committed discovery links untracked: 1 in skills/, 2 in .claude/skills/", out)
-        self.assertIn("(1): old-skill", out)
-        r = self.adopt(inst)                                 # nothing here needs --yes
-        self.assertIn("done — adopted", r.stdout)
-        self.assertEqual("?? scratch.txt", git(inst, "status", "--porcelain"))
-        tracked = git(inst, "ls-files").splitlines()
-        self.assertFalse(any(p == ".meta-os" or p.startswith(".claude/skills/") for p in tracked))
-        self.assertNotIn(".gitmodules", tracked)
-        self.assertFalse(os.path.lexists(inst / ".meta-os"))
-        self.assertFalse((inst / ".git" / "modules" / ".meta-os").exists())
-        self.assertNotIn(".meta-os", git(inst, "config", "--local", "--list"))
-        self.assertTrue((inst / "skills" / "graphify" / "SKILL.md").is_file())
-        self.assertFalse((inst / "skills" / "graphify").is_symlink())
-        self.assertFalse(os.path.lexists(inst / "skills" / "old-skill"))
-        self.assertTrue((inst / ".claude" / "skills" / "graphify").is_symlink())   # regenerated, ignored
-        self.assertEqual("# tmpl — the instance contract\n", (inst / ".claude" / "CLAUDE.md").read_text())
-        r = run(["python3", "scripts/validate_framework.py"], inst, check=False)
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn("0 commit(s) behind", run(["scripts/upgrade.sh", "--check"], inst).stdout)
 
     def test_a_framework_without_the_adoption_script_fails_instead_of_claiming_success(self):
         inst = self.make_old_instance()

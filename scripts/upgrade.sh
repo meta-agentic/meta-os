@@ -64,8 +64,15 @@ root=$(git rev-parse --show-toplevel 2>/dev/null) || die "not inside a git check
 cd "$root"
 # "done" is never printed over a tree this run left dirty: what git status shows at the
 # end must be what it showed at the start, or less.
-status_before=$(git status --porcelain)
-new_dirt() { git status --porcelain | grep -vxF -f <(printf '%s\n' "$status_before") || true; }
+# Per file (--untracked-files=all), so a folder of the operator's untracked files does not
+# collapse into one line that changes shape when the framework adds a file beside them.
+status_before=$(git status --porcelain --untracked-files=all)
+new_dirt() { git status --porcelain --untracked-files=all | grep -vxF -f <(printf '%s\n' "$status_before") || true; }
+# A failure after the merge commit says what it left and how to go back.
+after_merge() {
+  if [ "$(git rev-parse HEAD)" = "$head" ]; then die "$1"$'\n'"  state: nothing was merged (HEAD $(git rev-parse --short HEAD))"; fi
+  die "$1"$'\n'"  state: the merge is committed (HEAD $(git rev-parse --short HEAD)); nothing else was rolled back."$'\n'"  to undo this run: git reset --hard $(git rev-parse --short "$head")"
+}
 target="$remote/$branch"
 if [ ! -f .claude/CLAUDE.md ] && [ "$adopt" = 0 ]; then
   cat >&2 <<MSG
@@ -124,16 +131,16 @@ if [ "$adopt" = 1 ]; then
     python3 "$prog/adopt.py" "${aargs[@]}" </dev/null || die "adoption stopped — see above"
     [ "$dry" = 0 ] || exit 0
     if [ "$sync" = 1 ]; then
-      out=$(scripts/packs.sh sync) || die "merged, but scripts/packs.sh sync failed — fix what it reports, then re-run it"
+      out=$(scripts/packs.sh sync) || after_merge "adopted, but scripts/packs.sh sync failed — fix what it reports, then re-run it"
       printf '%s\n' "$out" | sed 's/^/  /'
     fi
     if command -v python3 >/dev/null 2>&1 && python3 -c 'import yaml' 2>/dev/null; then
       python3 scripts/validate_framework.py >/dev/null 2>&1 \
-        || die "merged, but the framework self-check fails — run: python3 scripts/validate_framework.py"
+        || after_merge "adopted, but the framework self-check fails — run: python3 scripts/validate_framework.py"
       say "  framework self-check: ok"
     fi
     dirty=$(new_dirt)
-    [ -z "$dirty" ] || die "merged, but this run left the working tree dirty — inspect before committing:"$'\n'"$dirty"
+    [ -z "$dirty" ] || after_merge "adopted, but this run left new changes in the working tree:"$'\n'"$dirty"
     say "done — adopted; from now on scripts/upgrade.sh is an ordinary merge"
     say "  enable the hooks once per clone: git config core.hooksPath .githooks"
     exit 0
@@ -233,17 +240,17 @@ fi
 
 # --- 4. rebuild the generated links ------------------------------------------------------------
 if [ "$sync" = 1 ]; then
-  out=$(scripts/packs.sh sync) || die "merged, but scripts/packs.sh sync failed — fix what it reports, then re-run it"
+  out=$(scripts/packs.sh sync) || after_merge "merged, but scripts/packs.sh sync failed — fix what it reports, then re-run it"
   printf '%s\n' "$out" | sed 's/^/  /'
 fi
-dirty=$(new_dirt)
-[ -z "$dirty" ] || die "the upgrade left the working tree dirty — inspect before committing:"$'\n'"$dirty"
 
 # --- 5. self-check (framework paths only in an instance) ------------------------------------------
 if command -v python3 >/dev/null 2>&1 && python3 -c 'import yaml' 2>/dev/null; then
   if python3 scripts/validate_framework.py >/dev/null 2>&1; then say "  framework self-check: ok"
   else say "  framework self-check reports problems — run: python3 scripts/validate_framework.py"; fi
 fi
+dirty=$(new_dirt)
+[ -z "$dirty" ] || after_merge "the upgrade left new changes in the working tree — inspect them before committing:"$'\n'"$dirty"
 
 # --- 6. record the reviewed template ref ------------------------------------------------------------
 if [ "$ack" = 1 ]; then

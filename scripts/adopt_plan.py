@@ -64,9 +64,10 @@ class Plan:
         self.backed_up: list[str] = []                   # untracked, framework's version wins
         self.identical: list[str] = []                   # untracked, byte-identical to the framework's
         self.case_clash: list[tuple[str, str]] = []      # (framework path, instance path)
-        self.submodules: list[tuple[str, str, str, bool]] = []   # framework copies: (path, name, url, local work)
+        self.submodules: list[tuple[str, str, str, str]] = []    # framework copies: (path, name, url, why --yes)
         self.discovery: list[str] = []                   # tracked generated links, untracked from now on
-        self.lost: list[str] = []                        # skill names discovery no longer finds
+        self.lost: list[str] = []                        # framework skill names discovery no longer finds
+        self.owned_links: list[tuple[str, str]] = []     # skills/ links to the instance's own folders
 
     def empty(self) -> bool:
         return not any((self.contract_move, self.contract_create, self.mounts, self.links,
@@ -106,8 +107,41 @@ def norm_url(url: str) -> str:
     return url.replace("git@github.com:", "https://github.com/")
 
 
-def framework_submodules(root: Path, head: dict[str, tuple[str, str]], remote_url: str) -> list[tuple[str, str, str, bool]]:
-    """(path, name, url, has local work) for each submodule that is a copy of the framework."""
+def submodule_local_state(root: Path, path: str, recorded: str) -> list[str]:
+    """What exists only in this submodule's own repository — gone if it were deleted."""
+    full = root / path
+    initialised = full.is_dir() and any(os.scandir(full))
+    gd = git("-C", path, "rev-parse", "--absolute-git-dir", check=False).stdout.strip() if initialised else ""
+    if not gd:
+        modules = Path(git("rev-parse", "--absolute-git-dir").stdout.strip()) / "modules" / path
+        gd = str(modules) if modules.is_dir() else ""
+    if not gd:
+        return []
+    found: list[str] = []
+    if initialised:
+        if git("-C", path, "status", "--porcelain", check=False).stdout.strip():
+            found.append("uncommitted or untracked files")
+        if git("-C", path, "rev-parse", "HEAD", check=False).stdout.strip() != recorded:
+            found.append("HEAD is not the recorded commit")
+    visited = set(git("--git-dir", gd, "reflog", "show", "--format=%H", "HEAD", check=False).stdout.split())
+    only_here = git("--git-dir", gd, "rev-list", *sorted(visited), "--branches", "--tags", "--not", "--remotes",
+                    check=False).stdout.split()
+    if only_here:
+        found.append(f"{len(only_here)} commit(s) on no remote-tracking branch")
+    if git("--git-dir", gd, "rev-parse", "-q", "--verify", "refs/stash", check=False).returncode == 0:
+        found.append("a stash")
+    return found
+
+
+def framework_submodules(root: Path, head: dict[str, tuple[str, str]], remote_url: str) -> list[tuple[str, str, str, str]]:
+    """(path, name, url, why --yes is needed or "") for each submodule that is a copy of the framework.
+
+    The framework is recognised by its URL: the public repository or the `upstream` remote.
+    A submodule that merely has the framework's shape (another instance vendored in, a
+    renamed fork) is listed too, but is removed only with --yes. Either way, a copy that
+    holds anything its remote does not (commits, a stash, local files) needs --yes and is
+    kept, with its repository, in the backup.
+    """
     r = git("config", "--blob", "HEAD:.gitmodules", "--get-regexp", r"^submodule\..*\.(path|url)$", check=False)
     subs: dict[str, dict[str, str]] = {}
     for line in r.stdout.splitlines():
@@ -117,15 +151,16 @@ def framework_submodules(root: Path, head: dict[str, tuple[str, str]], remote_ur
     known = {norm_url(CANONICAL), norm_url(remote_url)}
     out = []
     for name, sub in sorted(subs.items()):
-        path = sub.get("path", "")
+        path, url = sub.get("path", ""), sub.get("url", "")
         if head.get(path, ("",))[0] != "160000":
             continue
-        if norm_url(sub.get("url", "")) not in known and not is_framework_checkout(root / path):
+        by_url = norm_url(url) in known
+        if not by_url and not is_framework_checkout(root / path):
             continue
-        local = os.path.isdir(root / path) and any(os.scandir(root / path)) and (
-            bool(git("-C", path, "status", "--porcelain", check=False).stdout.strip())
-            or git("-C", path, "rev-parse", "HEAD", check=False).stdout.strip() != head[path][1])
-        out.append((path, name, sub.get("url", ""), local))
+        why = submodule_local_state(root, path, head[path][1])
+        if not by_url:
+            why.insert(0, "its URL is not the framework's — shaped like a framework checkout only")
+        out.append((path, name, url, "; ".join(why)))
     return out
 
 
@@ -235,15 +270,22 @@ def make_plan(root: Path, target: str, remote_url: str) -> Plan:
     own = {p.split("/")[1] for p in head if p.startswith("skills/") and p.count("/") >= 2
            and not any(q in is_link for q in prefixes(p))}
     regenerated = shipped | pack_skills(root) | own
+    packs_root = Path(os.path.realpath(root / ".packs"))
     for path in sorted(is_link - handled):
         folder, _, name = path.rpartition("/")
         if folder not in DISCOVERY_DIRS or path in fw_all:
             continue
         plan.discovery.append(path)
         handled.add(path)
-        if folder in ("skills", ".claude/skills") and name not in regenerated and not name.endswith(".md"):
+        real = Path(os.path.realpath(root / path))
+        generated = (not real.exists() or packs_root in real.parents
+                     or (real.parent.name == "skills" and is_framework_checkout(real.parent.parent)))
+        if folder == "skills" and not generated:
+            plan.owned_links.append((path, os.readlink(root / path)))   # the instance's own skill, linked in
+        elif folder in ("skills", ".claude/skills") and name not in regenerated and not name.endswith(".md"):
             plan.lost.append(name)
-    plan.lost = sorted(set(plan.lost))
+    owned = {p.rpartition("/")[2] for p, _ in plan.owned_links}
+    plan.lost = sorted(set(plan.lost) - owned)
 
     # 2. the instance contract (a contract that was a mount of the framework's is not one)
     if not (INSTANCE_CONTRACT in head or os.path.lexists(root / INSTANCE_CONTRACT)):
@@ -318,13 +360,17 @@ def report(plan: Plan, target: str, short: str) -> None:
         say(f"  instance contract: no {INSTANCE_CONTRACT} — instantiated from {TEMPLATE_CONTRACT}")
     for path, dest in plan.mounts:
         say(f"  mount removed: {path} -> {dest} (the framework's own takes its place)")
-    for path, name, url, local in plan.submodules:
-        say(f"  framework submodule removed: {path} ({url}){' — it has local work, backed up' if local else ''}"
-            f" (the framework's own paths replace this copy)")
+    for path, name, url, why in plan.submodules:
+        say(f"  framework submodule removed: {path} ({url}) (the framework's own paths replace this copy)")
+        if why:
+            say(f"    needs --yes: {why} — kept, with its repository, under $GIT_DIR/{BACKUP_DIR}/")
     if plan.discovery:
         counts = {d: sum(1 for p in plan.discovery if p.rpartition('/')[0] == d) for d in DISCOVERY_DIRS}
         say("  committed discovery links untracked: " + ", ".join(f"{n} in {d}/" for d, n in counts.items() if n)
             + " (scripts/packs.sh sync generates them from now on, never committed)")
+    for path, dest in plan.owned_links:
+        say(f"  instance skill linked into skills/: {path} -> {dest} — packs.sh sync manages every link"
+            f" there, so it would drop out of discovery; make it a real folder in skills/ first, or accept with --yes")
     if plan.lost:
         say(f"  no longer discovered — the framework at {short} does not ship them and no mounted pack provides"
             f" them ({len(plan.lost)}): {', '.join(plan.lost)}")

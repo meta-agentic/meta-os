@@ -31,6 +31,7 @@ A failure in step 5 rolls everything back. --dry-run prints the plan and writes 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime as _dt
 import os
 import shutil
@@ -48,15 +49,68 @@ def fill_template(text: str, name: str, ref: str) -> str:
                 .replace("{{template-ref}}", ref))
 
 
+def state(root: Path, plan: Plan) -> str:
+    """What a rollback must restore exactly: HEAD, index, status, submodules, and the mounts resolving."""
+    parts = [git("rev-parse", "HEAD").stdout, git("ls-files", "-s").stdout,
+             git("status", "--porcelain", "--ignored", "--untracked-files=all").stdout,
+             git("submodule", "status", check=False).stdout]
+    parts += [f"{p}:{os.path.exists(root / p)}" for p, _ in plan.mounts]
+    parts += [f"{p}:{sorted(os.listdir(root / p)) if os.path.isdir(root / p) else None}" for p, *_ in plan.submodules]
+    return "\n".join(parts)
+
+
+def put_back(src: Path, dest: Path) -> None:
+    """Move SRC to DEST, replacing the empty folder a `git reset` leaves for a gitlink."""
+    if dest.is_dir() and not dest.is_symlink() and not any(dest.iterdir()):
+        dest.rmdir()
+    if os.path.lexists(dest):
+        raise OSError(f"{dest} exists")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(src), str(dest))
+
+
+class Submodule:
+    """A framework submodule moved aside: its checkout and its repository, self-contained."""
+
+    def __init__(self, root: Path, gitdir: Path, path: str, name: str, backup: Path) -> None:
+        self.path, self.name = path, name
+        self.checkout, self.home = root / path, backup / path
+        self.repo, self.repo_home = gitdir / "modules" / path, backup / (path + ".git")
+        gitfile = self.checkout / ".git"
+        self.gitfile = gitfile.read_text() if gitfile.is_file() else None
+        self.worktree = git("config", "--file", str(self.repo / "config"), "core.worktree",
+                            check=False).stdout.strip() if self.repo.is_dir() else ""
+
+    def move_aside(self, undo: "Undo") -> None:
+        undo.submodules.append(self)
+        if os.path.lexists(self.checkout):
+            put_back(self.checkout, self.home)
+        if self.repo.is_dir():
+            put_back(self.repo, self.repo_home)
+            git("config", "--file", str(self.repo_home / "config"), "core.worktree", str(self.home))
+        if self.gitfile is not None and self.home.is_dir():   # readable from the backup on its own
+            (self.home / ".git").write_text(f"gitdir: {self.repo_home}\n")
+
+    def restore(self) -> None:
+        if self.repo_home.is_dir():
+            put_back(self.repo_home, self.repo)
+            if self.worktree:
+                git("config", "--file", str(self.repo / "config"), "core.worktree", self.worktree)
+        if self.home.exists():
+            put_back(self.home, self.checkout)
+            if self.gitfile is not None:
+                (self.checkout / ".git").write_text(self.gitfile)
+
+
 class Undo:
     """What execute() changed outside git's index and HEAD, to put back on failure."""
 
-    def __init__(self, root: Path, pre: str) -> None:
-        self.root, self.pre = root, pre
+    def __init__(self, root: Path, pre: str, backup: Path) -> None:
+        self.root, self.pre, self.backup = root, pre, backup
         self.links: list[tuple[str, str]] = []           # removed untracked links: (path, text)
         self.files: list[tuple[str, bytes]] = []         # removed identical copies: (path, bytes)
         self.moved: list[tuple[str, Path]] = []          # backed-up files: (path, backup)
-        self.submodules: list[tuple[str, str, Path]] = []  # framework submodules moved aside
+        self.submodules: list[Submodule] = []            # framework submodules moved aside
 
     def rollback(self) -> list[str]:
         problems: list[str] = []
@@ -73,10 +127,18 @@ class Undo:
             (self.root / path).write_bytes(data)
         for path, backup in self.moved:
             try:
-                (self.root / path).parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(backup), str(self.root / path))
+                put_back(backup, self.root / path)
             except OSError:
                 problems.append(f"mv {backup} {path}")
+        for sub in reversed(self.submodules):
+            try:
+                sub.restore()
+            except OSError as err:
+                problems.append(f"restore {sub.path} from {sub.home} and {sub.repo_home} ({err})")
+        if self.backup.is_dir() and not any(f for _, _, f in os.walk(self.backup)):
+            shutil.rmtree(self.backup)
+            with contextlib.suppress(OSError):
+                self.backup.parent.rmdir()
         return problems
 
 
@@ -84,32 +146,40 @@ def execute(root: Path, plan: Plan, target: str, new: str, name: str) -> None:
     pre = git("rev-parse", "HEAD").stdout.strip()
     stamp = _dt.datetime.now().strftime("%Y%m%dT%H%M%S")
     gitdir = Path(git("rev-parse", "--absolute-git-dir").stdout.strip())
-    undo = Undo(root, pre)
+    backup = gitdir / BACKUP_DIR / stamp
+    before = state(root, plan)
+    undo = Undo(root, pre, backup)
     try:
-        _apply(root, plan, target, new, name, gitdir / BACKUP_DIR / stamp, undo)
+        _apply(root, plan, target, new, name, gitdir, backup, undo)
     except BaseException as err:                          # noqa: BLE001 — every failure rolls back
         detail = err.stderr if isinstance(err, subprocess.CalledProcessError) else str(err)
         problems = undo.rollback()
+        if not problems and state(root, plan) != before:
+            problems.append("the repository does not match its state before the run — compare `git status`, "
+                            "`git submodule status` and the mounts with the plan above")
         if problems:
             sys.exit(f"adopt: failed ({detail.strip()}) and could not roll back fully — finish by hand:\n  "
                      + "\n  ".join(problems))
-        sys.exit(f"adopt: failed — rolled back to {pre[:12]}, nothing changed; fix the cause and re-run:\n"
+        sys.exit(f"adopt: failed — rolled back to {pre[:12]}, verified unchanged; fix the cause and re-run:\n"
                  f"  {detail.strip()}")
     print(f"  merged: {pre[:12]}..{git('rev-parse', '--short', 'HEAD').stdout.strip()} "
           f"— undo the whole adoption with `git reset --hard {pre[:12]}`")
-    local = {p for p, _n, _u, has_work in plan.submodules if has_work}
-    for path, name, dst in undo.submodules:              # a clean framework copy is not kept
-        if path in local:
-            continue
-        shutil.rmtree(dst, ignore_errors=True)
-        shutil.rmtree(gitdir / "modules" / path, ignore_errors=True)
-        git("config", "--remove-section", f"submodule.{name}", check=False)
-        undo.moved = [(p, d) for p, d in undo.moved if p != path]
+    needs_keeping = {p for p, _n, _u, why in plan.submodules if why}
+    for sub in undo.submodules:
+        git("config", "--remove-section", f"submodule.{sub.name}", check=False)
+        if sub.path in needs_keeping:
+            print(f"  kept: {sub.home} with its repository {sub.repo_home} (`git -C {sub.home} log --all` works there)")
+        else:                                            # nothing its remote lacks: not kept
+            shutil.rmtree(sub.home, ignore_errors=True)
+            shutil.rmtree(sub.repo_home, ignore_errors=True)
     if undo.moved:
-        print(f"  untracked content that was replaced is in {gitdir / BACKUP_DIR / stamp}")
+        print(f"  untracked content that was replaced is in {backup}")
+    if backup.is_dir() and not any(f for _, _, f in os.walk(backup)):
+        shutil.rmtree(backup)
 
 
-def _apply(root: Path, plan: Plan, target: str, new: str, name: str, backup: Path, undo: Undo) -> None:
+def _apply(root: Path, plan: Plan, target: str, new: str, name: str, gitdir: Path, backup: Path,
+           undo: Undo) -> None:
     for path, text in plan.links:
         (root / path).unlink()
         undo.links.append((path, text))
@@ -121,19 +191,16 @@ def _apply(root: Path, plan: Plan, target: str, new: str, name: str, backup: Pat
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(root / path), str(dst))
         undo.moved.append((path, dst))
-    for path, name, _url, _local in plan.submodules:
+    for path, sub_name, _url, _why in plan.submodules:
         git("rm", "-q", "--cached", "--", path)
-        git("config", "-f", ".gitmodules", "--remove-section", f"submodule.{name}")
+        git("config", "-f", ".gitmodules", "--remove-section", f"submodule.{sub_name}")
         if git("config", "-f", ".gitmodules", "--list", check=False).stdout.strip():
             git("add", "--", ".gitmodules")
         else:
             git("rm", "-q", "-f", "--", ".gitmodules")
-        if os.path.lexists(root / path):                 # the checkout moves aside; removed once merged
-            dst = backup / path
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(root / path), str(dst))
-            undo.moved.append((path, dst))
-            undo.submodules.append((path, name, dst))
+        Submodule(root, gitdir, path, sub_name, backup).move_aside(undo)   # removed once merged, or kept
+    if plan.owned_links:
+        git("rm", "-q", "--", *(p for p, _ in plan.owned_links))
     for path, _ in plan.mounts:
         git("rm", "-q", "--", path)
     if plan.discovery:
@@ -200,7 +267,7 @@ def main() -> None:
     remote_url = git("remote", "get-url", args.target.split("/", 1)[0], check=False).stdout.strip()
     plan = make_plan(root, args.target, remote_url)
     report(plan, args.target, new[:12])
-    needs_yes = bool(plan.replaced or plan.backed_up or any(local for *_, local in plan.submodules))
+    needs_yes = bool(plan.replaced or plan.backed_up or plan.owned_links or any(why for *_, why in plan.submodules))
     if args.dry_run:
         print("dry run — nothing changed"
               + ("; the real run refuses until the case clashes are renamed" if plan.case_clash else

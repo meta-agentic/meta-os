@@ -7,7 +7,7 @@
 
 Burn and setpoint are in the same unit (currency per hour by default). The controller never
 stops a running lane; it changes only how many may start. See
-systems/autonomous-pipeline-spike.md §5 for the plant model and the stability argument.
+systems/pipeline/control-spike.md §5 for the plant model and the stability argument.
 """
 from __future__ import annotations
 

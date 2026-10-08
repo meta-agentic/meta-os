@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Swarm pipeline as a Markovian queueing network — analytic + discrete-event check.
-Companion to systems/swarm-pipeline-queueing.md (findings) and systems/swarm-pipeline.md
-(the architecture the findings size). Standard library only; `python3 swarm-pipeline-model.py`
+Companion to systems/pipeline/queueing.md (findings) and systems/pipeline.md
+(the pipeline the findings size). Standard library only; `python3 queueing-model.py`
 prints every table in the findings doc, `--json` emits them as data.
 
 Stations (items flow left→right; a fraction p loops back from review to a lane):

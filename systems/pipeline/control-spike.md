@@ -4,8 +4,10 @@ tags: [os, system, swarm, pipeline, autonomy, control, spike]
 ---
 # Autonomous multi-lane pipeline — spike
 
-**Question.** [[systems/swarm-pipeline]] gives the swarm a loop and
-[[systems/swarm-pipeline-queueing]] sizes it. Both assume a human sets `m` and `N` and reads
+> **Evidence page**, kept as it was written (2026-09-16, with the reviewer's corrections of 2026-10-07). The living page is [[systems/pipeline]]: where the two differ, the living page wins. Folder index: [[systems/pipeline/_index|pipeline/]].
+
+**Question.** The pipeline model (now [[systems/pipeline]] §2) gives the swarm a loop and
+[[systems/pipeline/queueing]] sizes it. Both assume a human sets `m` and `N` and reads
 the gauges. This spike asks what it takes for the pipeline to run **unattended between human
 rounds**: to regulate its own token bandwidth, to reason about its own performance while it
 runs, and to use the human's absence rather than wait it out. It ends in questions for a

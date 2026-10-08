@@ -2,16 +2,26 @@
 type: system
 tags: [os, system, swarm, pipeline, autonomy, specification]
 ---
-# Autonomous pipeline — specification
+# Pipeline — the swarm as an autonomous closed loop
 
-**What this is.** The *what* of the autonomous multi-lane pipeline (ASML): a loop that runs
-unattended, keeps a fixed set of lanes busy with work that is ready, and stays inside the
-account's usage windows, while the product owner (PO) starts, pauses and stops it, and watches
-it from the dashboard. [[systems/swarm-pipeline]] is the model it runs,
-[[systems/swarm-pipeline-queueing]] sizes it, and [[systems/autonomous-pipeline-spike]] is the
-prototype it grows from. The *how* (runtime, record schema, control contract, sensor source,
-planner port) is the architecture decision that follows this specification; nothing here
-prescribes a module.
+The living page of the pipeline (the autonomous multi-lane pipeline, ASML): a loop that keeps
+a bounded set of lanes busy with work that is ready, across every project, runs unattended
+between the product owner's (PO's) sessions, stays inside the account's usage windows, and
+asks the PO for nothing but the decisions that are theirs. It replaces the one-batch model of
+[[systems/swarm-harness]], whose lanes end with the turn that spawned them and wait for a human
+to say "swarm" again.
+
+This page is the model and the specification in one: what the pipeline is (§2), what the PO
+asks of it (§3), and what each requirement means in numbers and tests (§4 to §14). The *how*
+(runtime, record schema, control contract, sensor source, planner port) belongs to the
+architecture decision that follows; nothing here prescribes a module.
+
+**Evidence**, dated and frozen, linked rather than restated: [[systems/pipeline/queueing]]
+sizes the pipeline as a queueing network, and
+[[systems/pipeline/queueing-model.py|queueing-model.py]] reproduces every table;
+[[systems/pipeline/control-spike]] works out how the loop regulates itself unattended and
+records the prototype it grew from. Where an evidence page and this page differ, this page
+wins. Folder index: [[systems/pipeline/_index|pipeline/]].
 
 **How to read it.** Every requirement is testable, and every one that needs a number states
 it. A number marked *(proposal)* is the default until the instance's PO decides; the instance
@@ -42,47 +52,117 @@ What the other four meanings become, so that no document or screen uses *lane* f
 | Old use of "lane" | Where | Becomes |
 |---|---|---|
 | A lead agent in its own worktree working a group of related items | [[systems/swarm-harness]], the agile pack | **work stream** |
-| One item, one branch, one session; a server of the queueing model | [[systems/swarm-pipeline]], [[systems/swarm-pipeline-queueing]] | **run** (the model's `m` is the number of lanes, unchanged) |
+| One item, one branch, one session; a server of the queueing model | the earlier model page (now §2), [[systems/pipeline/queueing]] | **run** (the model's `m` is the number of lanes, unchanged) |
 | A row of the prototype's `lanes.json`, minted per item and forgotten | `pipeline/` | **run** record; `lanes.json` holds lanes |
 | `cli` / `acp` / `auto` execution path of an engine | [[systems/engine]] | **engine route** |
 | A sprint's stories grouped by project (dashboard *Lanes* widget); one git worktree (dashboard *Flow* tab) | dashboard | **project swimlane**; **worktree** |
 
 The renames are applied by the work that touches each place, not in one sweep.
 
-## 2 · What the PO asks of it — user stories
+## 2 · The model — five stations, one cap
+
+```
+                 ┌──────────────── tokens released on DONE / NO GO ────────────────┐
+                 ▼                                                                  │
+ ready set ──▶ [D] dispatcher ──▶ [L] lanes (m) ──▶ [V] review ──▶ [C] cadence ──▶ [P] PO ──▶ close
+ (backlog)        tick, N tokens      worktree,          bot +         wait for      human      auto-
+                                      branch, PR         security      next session  merge/     transition
+                                        ▲                   │ rework                 decide
+                                        └───────────────────┘
+                                                            └──── q · auto-merge tier ────────▶ close
+```
+
+Five stations, one cap. **N**, the number of tokens, caps the items in flight end to end
+(CONWIP): a run starts only while a token is free, and a token is freed only when its item
+reaches `DONE` or `NO GO`. Everything else follows from that rule.
+
+- **D · Dispatcher**, the loop's tick (§6.4). Fetch every repository's default branch and the
+  backlog first: a plan computed on a stale checkout is the failure this design exists to
+  prevent. Then build the admissible set (§5.1), reap finished and stale runs (§9), assign
+  free lanes under the token and the binding rules (§5.2), start one session per assignment,
+  and record the tick and its gauges (§8.3). It holds no state beyond the record repository
+  (§10); the backlog is the authority on item status.
+- **L · Lanes and runs.** A lane carries one run at a time: a headless session
+  ([[systems/engine]]) started with a contract, not a conversation (the item, the repository,
+  the branch, the definition of done, the tracker's write rules). Inside the run the agile
+  pack's swarm skill governs the work: a fresh worktree off the default branch, implement,
+  clean-verify in the foreground, **review inside the run before the PR** (every 0.2 of rework
+  costs a quarter of lane capacity), open the PR, hand the item to `IN REVIEW`, end. A run
+  never merges and never closes an item.
+- **V · Review.** Every PR gets an independent reviewer pass and a security pass from agents
+  that did not write it. Defects go back to the lane (the rework loop); questions go to the PR
+  thread. Review is cheap next to lanes and must never be the queue that grows: give it more
+  servers before giving the lanes more.
+- **C and P · Cadence and PO.** The PO is a single server with limited attendance. Their
+  capacity is decisions per session times sessions per day; past the lane count that
+  saturates it, more lanes add review queue, not throughput. Their cadence puts a floor under
+  cycle time: a ready item waits, on average, half a cadence interval. Three disciplines:
+  **oldest first** (serving the freshest items first grows a tail nobody ever reaches); an
+  **auto-merge tier** (classes of change that pass every automated gate and carry no
+  human-judgement flag merge without the PO; the fraction `q` that qualifies is the cheapest
+  lever on throughput); and a **review-age limit** (when the oldest waiting item crosses it,
+  the space takes no new work, §5.1 rule 7: starving the input is the only way to stop a queue
+  growing at a station that cannot be sped up).
+- **Close.** A merge triggers the automatic transition to `DONE` in every repository a lane can
+  touch, or the pipeline reports as in flight what shipped days ago. `DONE` frees the token; the
+  next tick fills it.
+
+**Pooling with fairness.** With `n` projects, one pool of `m` lanes that any project can draw
+on beats `n` dedicated pools of `m/n`: queueing delay drops by an order of magnitude, and the
+chance that ready work waits for a lane falls by two thirds ([[systems/pipeline/queueing]],
+*Pooling*). The concurrency key still applies per repository, so pooling never puts two runs
+in the same module, and the fairness share (no space holds more than a configured share of
+the tokens) keeps one deep backlog from monopolising the pool.
+
+**Sizing rules**, from [[systems/pipeline/queueing]], with `μL` items per lane-day, `p` the
+rework fraction, `q` the auto-merge fraction and `P` the PO's effective decisions per day:
+
+| Quantity | Rule | Why |
+|---|---|---|
+| Lanes `m` | `m ≈ P / (μL · (1 − p) · (1 − q))` | lanes and PO saturate together; beyond this, lanes idle |
+| Tokens `N` | `N ≈ 2m` to `3m` | throughput is within a few percent of its ceiling by `N = 2m`; past `3m` only cycle time grows (Little's law, `W = N / X`) |
+| Reviewers | review utilisation below 0.5 | review must never be the growing queue |
+| Cadence | shorter sessions, more often | the expected wait is half the interval, whatever the session length |
+
+At the queueing analysis's calibration (2 items per lane-day, 20 % rework, the PO at 8
+decisions a day) these give `m = 5` and `N = 10–15` with no auto-merge tier, and `m = 10`,
+`N = 20–30` with half the items auto-merging. The sizing says how many lanes the *flow* can
+use; §7 says how many the *budget* can pay for. The smaller wins.
+
+## 3 · What the PO asks of it — user stories
 
 Each story is written as the PO would say it, followed by what makes it true.
 
 - **S1 · Run unattended.** "When I am away, ready work keeps moving." The loop ticks without a
-  human, at the interval in §5, survives its own process or container being reclaimed (its
+  human, at the interval in §6, survives its own process or container being reclaimed (its
   state is entirely in the record repository), and resumes from the last committed tick.
 - **S2 · Only ready work.** "Never start something that cannot finish." An item is started
-  only when it is admissible (§4): every blocker `DONE`, nothing holding it, its project
+  only when it is admissible (§5): every blocker `DONE`, nothing holding it, its project
   free on some lane. Every item not started carries a reason.
 - **S3 · Stay inside my limits.** "Do not burn the week on Monday." The number of working
   lanes is capped so that, at the measured mileage, neither window's reserve is touched before
-  its reset (§6). Hitting a reserve or a provider warning freezes new starts.
+  its reset (§7). Hitting a reserve or a provider warning freezes new starts.
 - **S4 · Lanes per project.** "One lane, one project at a time, and agents never cross
   projects." A lane bound to a project takes that project's items first, rebinds only when
   drained, and no session is ever used for a second project.
 - **S5 · Start, pause, stop.** "I can pause or stop one lane or the whole pipe, and start it
   again." Controls per lane and for the pipe, through the CLI and, on a local dashboard, the
-  Pipeline tab; each is acknowledged by the loop within the bound in §5.
+  Pipeline tab; each is acknowledged by the loop within the bound in §6.
 - **S6 · See it.** "I see each lane's state and numbers, and the whole pipe's." The Pipeline
-  tab and `status` show per-lane and aggregate state (§7).
+  tab and `status` show per-lane and aggregate state (§8).
 - **S7 · No silent stall.** "If a lane is stuck or the pipe is deadlocked, it is unstuck or I
   am told." A periodic watchdog reaps stale lanes, freezes on deadlock, and reports a stall
-  (§8).
+  (§9).
 - **S8 · Plan ahead, cheaply.** "Use the planner when it is there, reason when it is not, and
-  re-plan every few minutes without starting from zero." The planning policy in §4.3.
+  re-plan every few minutes without starting from zero." The planning policy in §5.3.
 - **S9 · A record I can audit.** "I can see what it did and why." Every tick, control, start,
-  end, reap and freeze is an event in the record repository with its reason (§9).
+  end, reap and freeze is an event in the record repository with its reason (§10).
 - **S10 · Morning page.** "I read one page in the morning." The window report lists what
   shipped, what waits for me, what was reaped or held and why, the windows, and the controls
   applied. It reads in under 15 minutes: the decisions waiting for the PO come oldest first,
   capped at what one session can take (8), and escalations at 5.
 
-## 3 · Non-goals and the envelope
+## 4 · Non-goals and the envelope
 
 The pipeline **never** merges a PR, never moves an item to `DONE` or `NO GO`, never creates or
 edits items, sprints or decision records, never edits the framework or pushes to a default
@@ -94,16 +174,16 @@ failure or a human stop). The dashboard never writes the
 record repository: it asks the CLI. Only a human clears a freeze. The pipeline is not enabled
 by default; an instance switches it on, like every automation in this framework.
 
-## 4 · Admission and planning
+## 5 · Admission and planning
 
-### 4.1 Admissible
+### 5.1 Admissible
 
 An item is **admissible** when all hold:
 
 1. its space is declared executable by the instance, and its project resolves;
 2. its status is a ready status (default `REFINED`), and it is not an epic;
 3. every blocker the dependency index lists for it is `DONE` now;
-4. no blocking label, exclusion rule or hold applies (a hold is set by the watchdog, §8);
+4. no blocking label, exclusion rule or hold applies (a hold is set by the watchdog, §9);
 5. no run of the same concurrency key is in flight (today the key is space, repository and
    primary tag);
 6. its retry count is below the cap (default 2);
@@ -115,22 +195,22 @@ Anything not admissible is reported with its first failing rule as the reason: *
 X (status)*, *label L*, *excluded*, *held after N reaps*, *project busy*, *not executable*,
 *review queue full*.
 
-### 4.2 Assignment
+### 5.2 Assignment
 
-Each tick, after reconciling controls (§5) and reaping (§8), free lanes take admissible items
+Each tick, after reconciling controls (§6) and reaping (§9), free lanes take admissible items
 in planner order, under four rules: a run starts only against a free **token** (the fixed
 work-in-progress cap `N` counts items from start until `DONE` or `NO GO`, so items waiting in
 review hold their token); a lane bound to project P takes P's items first; an idle, drained
 lane may rebind to another project only when no lane already bound to that project is idle,
 and only within the fairness share (no space holds more than half the tokens); and the number
-of working lanes never exceeds `m_cap` (§6). `N` is set by a human from the sizing in
-[[systems/swarm-pipeline-queueing]] and never by the loop.
+of working lanes never exceeds `m_cap` (§7). `N` is set by a human from the sizing in
+[[systems/pipeline/queueing]] and never by the loop.
 
-### 4.3 Planning policy
+### 5.3 Planning policy
 
 The planner of record is the instance's configured solver when it answers, and agent
 reasoning over the same inputs otherwise. The fallback is automatic, logged with its cause,
-and never blocks a tick. The planner orders; admission decides (§4.1): a schedule never starts
+and never blocks a tick. The planner orders; admission decides (§5.1): a schedule never starts
 a story the vault does not admit.
 
 | Event | Response | Number |
@@ -141,9 +221,9 @@ a story the vault does not admit.
 | A sudden budget drop (`m_cap` falls by more than one) | drop the lowest-priority runs from the plan; no running item is stopped | — |
 | The loop reorders the planner's admissible order | allowed, one recorded reason per change, counted as a gauge | — |
 
-## 5 · Lanes, the pipe, and controls
+## 6 · Lanes, the pipe, and controls
 
-### 5.1 States
+### 6.1 States
 
 Each lane has a **desired** state (`running`, `paused`, `stopped`, written only by a control)
 and an **actual** state:
@@ -155,12 +235,12 @@ and an **actual** state:
 | `draining` | no new item; the run in flight ends (PR or reap), its sessions are archived, the worktree released; then `idle` |
 | `paused` | desired `paused`, run (if any) finished, takes nothing |
 | `stopped` | desired `stopped`; sessions interrupted, item given back |
-| `stale` | flagged by the watchdog until reaped (§8) |
+| `stale` | flagged by the watchdog until reaped (§9) |
 
 The pipe has a desired state `running | paused | stopped` and, set only by the loop, `frozen`
 with a reason. The pipe wins: a lane cannot run while the pipe is paused, stopped or frozen.
 
-### 5.2 Controls
+### 6.2 Controls
 
 | Control | Effect at the next tick |
 |---|---|
@@ -175,7 +255,7 @@ the latency from request to effect. **Acknowledgement bound:** at most one tick 
 *(proposal: tick interval 10 min, so ≤ 10 min)*; the dashboard shows the control as *pending*
 until the application event exists.
 
-### 5.3 Cadence
+### 6.3 Cadence
 
 | Quantity | Value |
 |---|---|
@@ -183,19 +263,19 @@ until the application event exists.
 | Heartbeat poll of running sessions | every tick, and by a lighter heartbeat between ticks if the tick interval is raised |
 | Lanes in the proof-of-concept (`m_max`) | 3 *(proposal)* |
 
-### 5.4 Runtime
+### 6.4 Runtime
 
 One loop at a time, holding nothing it cannot rebuild from the record repository. It must run
 where the planner of record is reachable: while the solver is local-only, that is the machine
 that hosts it; once the solver is a reachable service, any host that reaches it. A routine
-wakes at most hourly, so the inner cadence of §5.3 comes from the loop itself.
+wakes at most hourly, so the inner cadence of §6.3 comes from the loop itself.
 
 *Proposal:* a self-paced loop inside one persistent session on the solver's host, sleeping
 the tick interval between ticks and woken early by run-ending events; a local scheduler
 restarts it if it dies, and the restarted loop resumes from the last committed tick. A loop
 started where the solver is unreachable runs on reasoning and says so on every tick.
 
-## 6 · Budget: the two windows and the lane cap
+## 7 · Budget: the two windows and the lane cap
 
 Units are each window's own allowance, never currency. For each window `w ∈ {5h, week}`, with
 `R_w` the remaining fraction of the allowance, `H_w` the hours to its reset, `ρ_w` its reserve
@@ -209,7 +289,7 @@ freeze  when R_w < ρ_w for any w, or the provider reports a warning or rejectio
 ```
 
 Inside `[m_min, m_cap]` the additive-increase, multiplicative-decrease law of
-[[systems/autonomous-pipeline-spike]] still sets the working-lane count `m` tick by tick; `m_cap`
+[[systems/pipeline/control-spike]] still sets the working-lane count `m` tick by tick; `m_cap`
 only bounds it from above. Speculative runs (declared decisions only, at most a third of `m`)
 count against `m_cap` like any other run.
 
@@ -237,9 +317,9 @@ So `m_cap = 1`: one lane works, whatever `m_max` is. At the same mileage with `R
 `m_week = ⌊0.05 / 0.0768⌋ = 0`: nothing starts, the running item finishes, and the pipe idles
 until the reset rather than touch the reserve.
 
-## 7 · Screens and commands, in words
+## 8 · Screens, commands and gauges, in words
 
-### 7.1 Commands
+### 8.1 Commands
 
 | Command | What it does |
 |---|---|
@@ -250,7 +330,7 @@ until the reset rather than touch the reserve.
 | `control pipe unfreeze --reason R` | Clears a freeze. Human only. |
 | `report` | Writes the window report (S10). |
 
-### 7.2 The Pipeline tab
+### 8.2 The Pipeline tab
 
 A dashboard tab, read from the record repository.
 
@@ -267,7 +347,18 @@ A dashboard tab, read from the record repository.
   hosted or GitHub-sourced dashboard. A control calls the CLI; the dashboard writes nothing
   itself.
 
-## 8 · Watchdog: stale, deadlock, stall
+### 8.3 Gauges
+
+Every tick records its gauges in the record repository and, where the framework's
+error-handler sink is enabled ([[hooks/_index]]), emits them. **Flow**: `lanes_active`,
+`tokens_free`, `ready_set`, `review_queue`, `review_age_max_days`, `throughput_24h`,
+`rework_24h`; the first four say whether the loop is populated, the last three which station
+is the bottleneck this week. **Budget**: `window_5h_remaining`, `window_week_remaining`,
+`mileage_5h`, `mileage_week`, `m_cap`. **Safety**: `lanes_stale`, `orphans`, `freeze` (with its
+reason), `loop_tick_age`, `planner_fallbacks`. The Pipeline tab and the morning report read
+them; nobody has to.
+
+## 9 · Watchdog: stale, deadlock, stall
 
 Runs at every tick before admission, and as a lighter heartbeat between ticks that only reads
 sessions.
@@ -288,7 +379,7 @@ sessions.
 The watchdog's only backlog arc is the give-back; it never merges, closes, creates or widens
 anything.
 
-## 9 · The record repository
+## 10 · The record repository
 
 A private repository named in the instance config, never the framework repository, never a
 place for secrets. It holds the loop's state (pipe, lanes, controls), each tick's plan and
@@ -298,7 +389,38 @@ phase; a push that is not a fast-forward means another loop wrote, and this one 
 window report is also filed in the instance's memory. Retention: everything is kept, since it
 is text and the history is the audit trail *(proposal)*.
 
-## 10 · Acceptance examples
+## 11 · Configuration
+
+Instance-level. The prototype loop (`pipeline/tick.py`) reads a YAML file named on its command
+line today; the intended home is the estate-config namespace `meta-os.swarm`
+([[systems/config]]), which is **not in the schema yet**. The architecture decision fixes the
+final key set (it adds at least the reserves, the record repository and the executable
+spaces); the model's keys and defaults are:
+
+| Key | Meaning | Default |
+|---|---|---|
+| `lanes` | `m_max`, the lane slots | 5 from the sizing (§2); 3 *(proposal)* for a proof of concept |
+| `tokens` | `N`, the CONWIP cap | `2 × lanes` |
+| `fairness_share` | the largest share of the tokens one space may hold | 0.5 |
+| `automerge_classes` | change classes that skip the PO | `[]` |
+| `review_sla_days` | the review-age limit that stops new work for a space | 5 |
+| `lane_budget` | a run's cap before it is reaped: its expected cost × 3 | 3 |
+| `tick` | the tick interval | 10 min *(proposal)*; hourly is too slow to re-plan |
+
+## 12 · Failure modes this design closes
+
+| Failure | What closes it |
+|---|---|
+| Lanes end with the turn and nothing re-populates them | the dispatcher's tick |
+| Work planned on a stale checkout | fetch before every read and every write |
+| The review queue grows without bound | the PO's capacity in the sizing, oldest first, the review-age limit |
+| More lanes, same throughput | the sizing says where the ceiling is; the budget says what is affordable |
+| An item closed in a repository the auto-transition does not watch stays "in flight" | the automatic close in every repository a lane can touch |
+| Two sessions mint the same id | reserved id counters per space |
+| A run that never ends, a lane nobody notices is stuck | the watchdog (§9) |
+| The week's allowance spent by Monday | the window-paced lane cap (§7) |
+
+## 13 · Acceptance examples
 
 Each is a test the implementation must pass, on fixtures; the instance repeats them on its real
 backlog and records the outcome next to its decisions.
@@ -309,7 +431,7 @@ backlog and records the outcome next to its decisions.
 2. **Drain on rebind.** Lane 2 is working an item of project P when a `bind lane-2 Q` control
    arrives. Lane 2 shows *draining*, takes nothing new, and binds to Q only after the run ends
    in a PR or a reap; no session of P is used for Q.
-3. **The week caps the lanes.** With the windows of the worked example in §6 and `m_max = 3`,
+3. **The week caps the lanes.** With the windows of the worked example in §7 and `m_max = 3`,
    `m_cap = 1`; a second admissible item waits with the reason *budget cap*.
 4. **Stop gives back without a retry.** `stop lane-1` while it works item C: C returns to
    `REFINED` with the *stopped by human* note, its retry count unchanged, and the lane shows
@@ -327,12 +449,20 @@ backlog and records the outcome next to its decisions.
 10. **Not executable.** An admissible-looking item in a space the instance does not declare
     executable is never assigned, and is reported as *not executable*.
 
-## 11 · Decisions this specification leaves to the PO
+## 14 · Decisions this specification leaves to the PO
 
-Nine, each with the proposal above as its default: the lane model (§5.3, `m_max`, drain); control
-semantics (§5.2, acknowledgement bound); budget policy (§6, reserves, `K`, shape, last hour);
-what the record repository logs and keeps (§9); the dashboard's write exception (§7.2); the
+Nine, each with the proposal above as its default: the lane model (§6.3, `m_max`, drain); control
+semantics (§6.2, acknowledgement bound); budget policy (§7, reserves, `K`, shape, last hour);
+what the record repository logs and keeps (§10); the dashboard's write exception (§8.2); the
 loop runtime (how it is woken, where it runs so that the solver is reachable, and how it
-survives a reclaimed container); stale and deadlock thresholds (§8); proof-of-concept scope
-(executable spaces and `m_max`); and the planning policy (§4.3). The instance records each
+survives a reclaimed container); stale and deadlock thresholds (§9); proof-of-concept scope
+(executable spaces and `m_max`); and the planning policy (§5.3). The instance records each
 answer in its own tracker; this page then drops the *(proposal)* mark from the number.
+
+## What this is not
+
+Not a second orchestration stack: coordination *inside* a run stays with the host engine
+([[systems/engine]]) and the agile pack's skill. Not a scheduler for humans: the PO station is
+modelled so that its limits are visible, not so that it can be automated away. And not enabled
+by default: like every hook and automation in this framework, it ships as a contract and is
+switched on per instance ([[hooks/_index]], [[systems/packs]]).

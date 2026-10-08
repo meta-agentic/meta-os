@@ -179,7 +179,7 @@ class TickEndToEnd(unittest.TestCase):
     def test_plan_record_report(self):
         v = FakeVault(); state = tempfile.mkdtemp(); cfgdir = tempfile.mkdtemp()
         try:
-            model = os.path.join(os.path.dirname(os.path.dirname(HERE)), "systems", "swarm-pipeline-model.py")
+            model = os.path.join(os.path.dirname(os.path.dirname(HERE)), "systems", "pipeline", "queueing-model.py")
             cfg = dict(CFG, vault=v.dir, model_path=model, backlog_cli=None, vault_autocommit=False,
                        lane_prompt="Work on {id}: {title} in {repo} on {branch}\n{item_body}",
                        regulator={"N0": 3, "N_min": 1, "N_max": 4, "budget": 20, "window_hours": 5, "lane_cap": 12},

@@ -4,13 +4,15 @@ tags: [os, system, swarm, pipeline, queueing, spike]
 ---
 # Swarm Pipeline — queueing analysis (spike findings)
 
-The spike behind [[systems/swarm-pipeline]]. Question: *for a swarm of `m` lanes serving
+> **Evidence page**, kept as it was written (2026-09-15). The living page is [[systems/pipeline]]: where the two differ, the living page wins. Folder index: [[systems/pipeline/_index|pipeline/]].
+
+The spike behind the pipeline model (now [[systems/pipeline]] §2). Question: *for a swarm of `m` lanes serving
 `n` projects, which configuration delivers the most closed items per day, at what cycle
 time, and where is the bottleneck?* Method: model the pipeline as a Markovian queueing
 network, solve it in closed form where the theory allows and by exact mean-value analysis
 where it does not, and cross-check one point of each regime with a discrete-event
 simulation. Everything here is reproducible from
-[[systems/swarm-pipeline-model.py|swarm-pipeline-model.py]] (standard library only).
+[[systems/pipeline/queueing-model.py|queueing-model.py]] (standard library only).
 
 ## The model
 
@@ -144,7 +146,7 @@ What the model does **not** capture: heavy-tailed service (one item that takes a
 priority starvation at the PO (a LIFO station leaves a tail of items that are never
 served; the fix is a discipline, oldest-first, not a parameter), and correlated failures
 (a broken main that stalls every lane at once). The first two are visible in the data
-that motivated the spike; the design in [[systems/swarm-pipeline]] addresses them by
+that motivated the spike; the design in [[systems/pipeline]] addresses them by
 policy rather than by modelling.
 
 ## Sizing rules that fall out
@@ -161,8 +163,8 @@ policy rather than by modelling.
 ## Reproduce
 
 ```bash
-python3 systems/swarm-pipeline-model.py          # the tables above
-python3 systems/swarm-pipeline-model.py --json   # as data, for a dashboard or a notebook
+python3 systems/pipeline/queueing-model.py          # the tables above
+python3 systems/pipeline/queueing-model.py --json   # as data, for a dashboard or a notebook
 ```
 
 Edit the `Params` defaults or construct `Params(...)` in a REPL to run your own calibration.

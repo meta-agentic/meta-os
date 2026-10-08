@@ -4,6 +4,9 @@ tags: [os, system, swarm]
 ---
 # Swarm Harness
 
+> **The batch model the pipeline replaced.** Kept for the one rule and the in-run discipline it
+> defines, which the pipeline still applies; for how work flows now, read [[systems/pipeline]].
+
 Parallel multi-lane execution. Procedure lives in the [[skills/agile-swarm/SKILL|agile-swarm]] skill; this anchors
 the model and its one hard rule.
 
@@ -34,7 +37,7 @@ serialize.
 
 This is the model of **one batch**. What keeps batches flowing — the dispatcher that
 re-populates lanes as items close, the WIP cap, the PO station's limits and the sizing
-rules — is [[systems/swarm-pipeline]], sized by [[systems/swarm-pipeline-queueing]].
+rules — is [[systems/pipeline]], sized by [[systems/pipeline/queueing]].
 
 ## Relation to the operating model
 

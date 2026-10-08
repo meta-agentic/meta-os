@@ -13,6 +13,7 @@ stops being enforced.
 |------|------|
 | `test_instance_lifecycle.py` | Builds a throwaway upstream from this working tree, then drives `scripts/bootstrap.sh` and `scripts/upgrade.sh` the way an adopter does: instantiation and placeholders, remotes, generated links never tracked, idempotence, dry run, developer mode, the gate passing inside an instance and refusing a tracked instance path in the framework, an upgrade that changes framework paths and no instance path, the refusal when an instance edited a framework path, the first merge of a template-snapshot instance, and the template-drift report. |
 | `test_packs_sh.py` | Drives `scripts/packs.sh` against local fixture packs in the one-repository layout: mount, idempotent apply, remove, the pack links placed beside the framework's skills and listed in `.git/info/exclude`, the framework winning a name collision, dangling and off-pin mounts refused, name validation, config resolution. |
+| `test_run_tests.py` | Pins `scripts/run_tests.py`: it finds this repository's suites (this one and the pipeline's), never a `fixtures/` file or an ignored one, fails the run on one failing suite and on finding none, and is what the blocking CI job calls, with no suite named there by hand. |
 | `test_validate_pack.py` | Drives `scripts/validate_pack.py` through its real command line against the fixture packs: the required-file checklist, the manifest schema, the per-skill shape, and the estate-neutral scan including the ratified LICENSE exemption and its adversarial probes. Also asserts the reusable workflow a pack repo adopts is present and callable. |
 | `fixtures/` | The two control packs — see [[tests/fixtures/_index\|fixtures/]]. |
 
@@ -21,11 +22,12 @@ stops being enforced.
 ```bash
 python3 -m unittest discover -s tests        # the suite
 python3 -m unittest discover -s tests -v     # with each case named
+python3 scripts/run_tests.py                 # every suite in the repo, this one included, as CI runs them
 ```
 
-Dependencies are the gates' own: `pyyaml` and `jsonschema`, plus `git` and `bash` for the lifecycle and packs suites. CI runs the suite in the
-blocking job of [[systems/packs|the check workflow]], so a change that weakens the pack
-gate reddens the build rather than passing quietly.
+Dependencies are the gates' own: `pyyaml` and `jsonschema`, plus `git` and `bash` for the lifecycle and packs suites. CI runs the suite, with every other suite in the repository, through
+`scripts/run_tests.py` in the blocking job of [[systems/packs|the check workflow]], so a change that
+weakens the pack gate reddens the build rather than passing quietly.
 
 ## Writing a new case
 

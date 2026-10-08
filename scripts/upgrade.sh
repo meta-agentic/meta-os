@@ -13,8 +13,10 @@
 #
 # A repository that was an instance BEFORE it had the framework's history (its own
 # contract in the root CLAUDE.md, framework folders mounted as symlinks, its own hooks
-# and ignores) is adopted once, with the copy of this script on the fetched framework:
+# and ignores) is adopted once, with the copy of this script on the fetched framework.
+# That pipes whatever `upstream` serves into bash, so check the remote first:
 #
+#   git remote get-url upstream      # https://github.com/meta-agentic/meta-os.git, or a fork you trust
 #   git fetch upstream && git show upstream/main:scripts/upgrade.sh | bash -s -- --adopt --dry-run
 #
 # Options
@@ -23,7 +25,8 @@
 #                    root contract to .claude/CLAUDE.md, removes symlink mounts at framework
 #                    paths, moves instance hooks and ignore rules to their extension points,
 #                    lists every other instance file the framework's version would replace
-#   --dry-run        with --adopt: print the adoption plan, change nothing
+#   --dry-run        print the plan and write nothing — no fetch, merge, commit, index or
+#                    exclude change (with --adopt: the adoption plan; without: as --check)
 #   --yes            with --adopt: accept replacing the instance content the plan lists
 #   --remote NAME    the framework remote (default: upstream)
 #   --branch NAME    the framework branch (default: main)
@@ -54,7 +57,8 @@ while [ $# -gt 0 ]; do
     *) die "unknown option '$1' (see --help)" ;;
   esac
 done
-[ "$adopt" = 1 ] || [ "$dry" = 0 ] || check=1      # without --adopt, a dry run is --check
+[ "$adopt" = 0 ] || [ "$check" = 0 ] || dry=1    # --adopt --check is the adoption's dry run
+[ "$dry" = 0 ] || check=1        # a dry run never merges, with --adopt or without
 
 root=$(git rev-parse --show-toplevel 2>/dev/null) || die "not inside a git checkout"
 cd "$root"
@@ -75,18 +79,30 @@ cfg=meta-os.config.json
 template_ref() { [ -f "$cfg" ] && sed -n 's/.*"template": *"\([0-9a-f]\{7,40\}\)".*/\1/p' "$cfg" | head -1 || true; }
 
 # --- 0. fetch ----------------------------------------------------------------------
-say "upgrade — fetching $target"
-git fetch -q "$remote" "$branch" || die "fetch from '$remote' failed"
-git rev-parse -q --verify "$target^{commit}" >/dev/null || die "no $target after fetch"
+if [ "$dry" = 1 ]; then
+  say "upgrade — dry run on the already fetched $target (nothing is fetched or written)"
+  git rev-parse -q --verify "$target^{commit}" >/dev/null || die "no $target yet — git fetch $remote first"
+else
+  say "upgrade — fetching $target"
+  git fetch -q "$remote" "$branch" || die "fetch from '$remote' failed"
+  git rev-parse -q --verify "$target^{commit}" >/dev/null || die "no $target after fetch"
+fi
+# This run executes (and merges) what that remote serves: name it, and flag one that is not
+# the public framework repository.
+url=$(git remote get-url "$remote")
+norm() { printf '%s' "${1%/}" | sed -e 's|\.git$||' -e 's|^git@github\.com:|https://github.com/|'; }
+if [ "$(norm "$url")" != "https://github.com/meta-agentic/meta-os" ]; then
+  say "  note: $remote is $url, not the public framework repository — make sure you trust it"
+fi
 head=$(git rev-parse HEAD); new=$(git rev-parse "$target")
 base=$(git merge-base HEAD "$target" 2>/dev/null || true)
 behind=$(git rev-list --count "HEAD..$target")
-say "  framework: $(git rev-parse --short "$target") on $target — this instance is $behind commit(s) behind"
+say "  framework: $(git rev-parse --short "$target") on $target ($url) — this instance is $behind commit(s) behind"
 
 # --- adopt: the first merge into a pre-existing instance -----------------------------------
 if [ "$adopt" = 1 ]; then
   if [ -n "$base" ]; then
-    say "  this repository already shares history with $target — nothing to adopt; this is an ordinary upgrade"
+    say "  this repository already shares history with $target — nothing to adopt; this is an ordinary upgrade$([ "$check" = 1 ] && echo ", reported only")"
     [ -f .claude/CLAUDE.md ] || die "no .claude/CLAUDE.md — move the instance contract there by hand, then re-run"
   else
     command -v python3 >/dev/null 2>&1 || die "--adopt needs python3"

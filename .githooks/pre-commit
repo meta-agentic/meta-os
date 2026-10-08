@@ -2,13 +2,15 @@
 # meta-os framework self-check gate, then the instance's own pre-commit hooks.
 # Enable per clone: git config core.hooksPath .githooks
 #
-# Extension point (systems/distribution.md): every executable file in
+# Extension point (systems/distribution.md): every executable file named like a
+# run-parts part (letters, digits, '_' and '-'; a symlink is followed) in
 # .githooks.d/pre-commit/ runs after the gate, in name order, with this hook's
 # arguments; the first that fails fails the commit. An instance adds its hooks
 # there and never edits this file.
 root="$(git rev-parse --show-toplevel)"
 python3 "$root/scripts/validate_framework.py" || exit $?
 for hook in "$root/.githooks.d/pre-commit"/*; do
+  case "${hook##*/}" in *[!A-Za-z0-9_-]*) continue ;; esac   # run-parts names: no *.orig, *~, .swp
   [ -f "$hook" ] && [ -x "$hook" ] || continue
   "$hook" "$@" || exit $?
 done

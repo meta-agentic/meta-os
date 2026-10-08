@@ -118,19 +118,26 @@ def framework_scope() -> tuple[str, frozenset[str], frozenset[str]] | None:
     """In an instance: (ref, files, folders) the framework tracks at the last merged commit.
 
     None outside an instance (everything tracked is the framework's) and when no
-    framework ref is reachable (the template-derived fallback applies).
+    framework ref is reachable (the template-derived fallback applies). An instance
+    COMMITS its contract; a framework developer's checkout (`bootstrap.sh --local`)
+    only has it on disk, excluded — and must keep the full scope, or a file added on
+    a branch there would escape the gate whenever an `upstream` remote exists.
     """
-    if not instance_mode():
+    if not instance_mode() or _git("ls-files", "--error-unmatch", ".claude/CLAUDE.md") is None:
         return None
-    ref = os.environ.get("META_OS_FRAMEWORK_REF") or "upstream/main"
-    base = _git("merge-base", "HEAD", ref)
-    listing = _git("ls-tree", "-r", "-z", "--name-only", base.strip()) if base else None
-    if listing is None:
+    # An override can only widen the scope: the merge base with upstream/main still counts,
+    # so a stale $META_OS_FRAMEWORK_REF cannot hide a file the framework added since.
+    refs = dict.fromkeys(r for r in (os.environ.get("META_OS_FRAMEWORK_REF"), "upstream/main") if r)
+    bases = [b.strip() for b in (_git("merge-base", "HEAD", r) for r in refs) if b]
+    names: set[str] = set()
+    for base in bases:
+        names.update(n for n in (_git("ls-tree", "-r", "-z", "--name-only", base) or "").split("\0") if n)
+    if not names:
         return None
-    files = frozenset(n for n in listing.split("\0") if n)
+    files = frozenset(names)
     folders = frozenset("/".join(Path(n).parts[:i]) for n in files
                         for i in range(1, len(Path(n).parts)))
-    return base.strip(), files, folders
+    return " + ".join(b[:12] for b in dict.fromkeys(bases)), files, folders
 
 # ---------------------------------------------------------------------------
 # The `_index.md` convention, and the one ambiguity in it — resolved here.
@@ -614,9 +621,9 @@ def main() -> None:
               f"{BASELINE.relative_to(ROOT)}")
         return
 
-    if instance_mode():
+    if instance_mode() and _git("ls-files", "--error-unmatch", ".claude/CLAUDE.md") is not None:
         scope = framework_scope()
-        print(f"  instance: checking the framework's paths at {scope[0][:12]}" if scope else
+        print(f"  instance: checking the framework's paths at {scope[0]}" if scope else
               "  instance: no framework ref (set META_OS_FRAMEWORK_REF or add the `upstream` "
               "remote) — scope approximated by instance-template/root/")
     baseline = read_baseline()

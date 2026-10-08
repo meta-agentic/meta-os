@@ -1,6 +1,6 @@
 """Reflection: predicted vs measured, attribution, bounded action, escalation.
 
-The predictor is the queueing model in systems/swarm-pipeline-model.py, loaded by path so
+The predictor is the queueing model in systems/pipeline/queueing-model.py, loaded by path so
 the pipeline never duplicates it. Reflection may act only at the parametric level and only
 within the regulator's bounds; everything else is recorded and escalated.
 """

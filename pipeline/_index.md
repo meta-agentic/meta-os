@@ -4,8 +4,8 @@ tags: [os, pipeline, automation]
 ---
 # pipeline/ — the autonomous swarm loop (deterministic half)
 
-Design: [[systems/swarm-pipeline]] · sizing: [[systems/swarm-pipeline-queueing]] ·
-autonomy (regulator, reflection, speculation): [[systems/autonomous-pipeline-spike]].
+Design and specification: [[systems/pipeline]] · evidence: sizing [[systems/pipeline/queueing]],
+autonomy (regulator, reflection, speculation) [[systems/pipeline/control-spike]].
 
 This folder is **mechanism, not policy** — instances mount it rather than copy it, so it
 must run unchanged in every one of them: it holds no repository names, no budgets, no

@@ -16,6 +16,7 @@ the procedure. Load the one you need.
 | [[systems/scrum-harness\|scrum-harness]] | The agile process: backlog↔Jira, ceremonies, sprint lifecycle (driven by [[skills/agile-process/SKILL|agile-process]]) |
 | [[systems/swarm-harness\|swarm-harness]] | Parallel multi-lane execution model (driven by [[skills/agile-swarm/SKILL|agile-swarm]]) |
 | [[systems/swarm-pipeline\|swarm-pipeline]] | The swarm as a closed loop: a dispatcher keeps `m` lanes populated over `n` projects under a WIP cap, review and PO stations, auto-merge tier, sizing rules, gauges |
+| [[systems/autonomous-pipeline\|autonomous-pipeline]] | Specification of the autonomous pipeline (ASML): one meaning for *lane*, the PO's stories, admission and planning policy, lane and pipe states with their controls, the two usage windows and the lane cap, the watchdog, the record repository, screens and commands in words, and the acceptance examples; numbers marked *(proposal)* until the PO decides |
 | [[systems/swarm-pipeline-queueing\|swarm-pipeline-queueing]] | Spike findings sizing the pipeline as a Markovian queueing network — where the ceiling is, what tokens buy, why pooling wins; [[systems/swarm-pipeline-model.py\|swarm-pipeline-model.py]] reproduces every table |
 | [[systems/ontology\|ontology]] | The vault's type system made explicit: note types, tags, relations ([[systems/ontology.yaml\|ontology.yaml]] is the machine-readable contract) |
 | [[systems/interface-layer\|interface-layer]] | Layer 3 contract: what the dashboard reads, how it triggers runs, ontology-driven rendering |

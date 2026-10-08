@@ -17,6 +17,7 @@ invariants about itself in [[CLAUDE|CLAUDE.md]], [[PROVENANCE]], `README.md` and
 | `packs.sh` | **Packs.** `add · remove · update · list · sync · apply · check · config` — mounts a pack as a pinned submodule at `.packs/<name>`, links its skills into `skills/` beside the framework's own and mirrors `skills/` into `.claude/skills/`; refuses dangling or off-pin mounts. The single home of the script: it used to be vendored per instance from the template repository. Contract: [[systems/packs]]. |
 | `validate_framework.py` | The self-check. Skill registration (provenance row + catalog entry), catalog entries that resolve on disk, `systems/*.md` front-matter against [[systems/ontology]], the `_index.md` convention, a public-safety scan for instance identifiers, derivable count claims, and — one repository, two owners — that the framework tracks no file at an instance path (derived from `instance-template/root/`). Inside a bootstrapped instance it scopes itself to the framework's paths. |
 | `framework-baseline.txt` | Accepted pre-existing debt — the ratchet. A violation listed here warns; anything else is an error. Debt can be paid down, never grown. |
+| `run_tests.py` | **Every test suite.** Finds each directory holding a `test_*.py` outside `fixtures/` (today the gates' own [[tests/_index\|tests/]] and [[pipeline/tests/_index\|pipeline/tests/]]) and runs each in its own interpreter; exits non-zero on any failure or on finding none. The one command CI runs, so a new suite is in the build the moment it is committed. `--list` prints the suites; `-v` names each case. |
 | `validate_pack.py` | The pack conformance gate — the **single home** of the checker. `pack.yaml` against [[systems/pack.schema.json\|pack.schema.json]], the `required_files` checklist, the per-skill shape, `meta-os.config.json`, and the estate-neutral scan (instance identifiers, with the ratified LICENSE-holder exemption). Takes a pack directory, so it works against a checkout of any pack repository. |
 | `pack-baseline.txt` | The same ratchet for packs. `estate-neutral` and `checklist-placeholder` can never enter it. |
 
@@ -33,10 +34,11 @@ python3 scripts/validate_framework.py --update-baseline   # re-record accepted d
 
 python3 scripts/validate_pack.py                   # every pack that lives inside this repo
 python3 scripts/validate_pack.py ../some-pack      # one pack, from anywhere on disk
-python3 -m unittest discover -s tests              # the gates' own tests — see [[tests/_index|tests/]]
+python3 scripts/run_tests.py                       # every test suite in the repo, as CI runs them
+python3 -m unittest discover -s tests              # one suite: the gates' own tests — see [[tests/_index|tests/]]
 ```
 
-Both gates run in CI (`.github/workflows/check.yml`), where they cannot be skipped. A
+Both gates and every test suite run in CI (`.github/workflows/check.yml`), where they cannot be skipped. A
 pack in **its own repository** runs the same `validate_pack.py` by calling
 `.github/workflows/pack-conformance.yml` from a one-file caller workflow — see
 [[systems/packs]]. No pack's conformance depends on a local copy of anything.

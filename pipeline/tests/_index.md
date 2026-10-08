@@ -17,5 +17,8 @@ Unit and end-to-end tests for [[pipeline/metaos_pipeline/_index|metaos_pipeline/
 python3 -m unittest discover -s pipeline/tests
 ```
 
+CI runs it in the blocking job of the check workflow, through `scripts/run_tests.py`,
+which finds every suite in the repository.
+
 The fixtures use synthetic space keys that cannot be mistaken for a real tracker key, so
 the framework's public-safety scan stays clean without an allow-list entry.

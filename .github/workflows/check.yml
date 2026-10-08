@@ -82,16 +82,20 @@ jobs:
           python scripts/validate_pack.py
           echo "### Pack conformance gate: enforced" >> "$GITHUB_STEP_SUMMARY"
 
-      # The gates' and the lifecycle's own tests. A conformance checker nobody
-      # exercises decays into a script that exits 0, so the fixture packs in
-      # tests/fixtures/ — one conforming, one deliberately violating — are driven
-      # through the real command line here; and the one-repository promise (an
-      # upgrade changes framework paths and no instance path) is driven end to end
-      # through scripts/bootstrap.sh and scripts/upgrade.sh in throwaway clones of
-      # this very tree. This step is what makes both facts about this repository
-      # rather than claims in a review comment.
-      - name: Gate self-tests and instance lifecycle (bootstrap → upgrade)
-        run: python -m unittest discover -s tests -v
+      # Every test suite in the repository, found rather than listed: any directory
+      # holding a test_*.py outside fixtures/, each in its own interpreter. A suite
+      # CI never runs decays unseen (the pipeline's did), so a new one joins this
+      # step the moment it is committed, and tests/test_run_tests.py fails if this
+      # step goes back to naming suites by hand. Among them: the gates' own tests,
+      # which drive the fixture packs in tests/fixtures/ (one conforming, one
+      # deliberately violating) through the real command line, because a
+      # conformance checker nobody exercises decays into a script that exits 0;
+      # the one-repository promise (an upgrade changes framework paths and no
+      # instance path), driven end to end through scripts/bootstrap.sh and
+      # scripts/upgrade.sh in throwaway clones of this very tree; and the
+      # pipeline's ready set, regulator, ledger and tick round trip.
+      - name: Every test suite (gates, instance lifecycle, pipeline)
+        run: python scripts/run_tests.py -v
 
   debt:
     name: True debt (--strict, advisory)

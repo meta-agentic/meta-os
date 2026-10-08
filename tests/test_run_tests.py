@@ -112,6 +112,7 @@ class InInstance(unittest.TestCase):
         self.fw = self.tmp / "framework"
         for rel, text in {"scripts/run_tests.py": RUNNER.read_text(),
                           "scripts/validate_framework.py": (ROOT / "scripts" / "validate_framework.py").read_text(),
+                          "scripts/ci_framework_ref.py": (ROOT / "scripts" / "ci_framework_ref.py").read_text(),
                           "tests/test_t.py": PASSING, "pipeline/tests/test_p.py": PASSING}.items():
             (self.fw / rel).parent.mkdir(parents=True, exist_ok=True)
             (self.fw / rel).write_text(text, encoding="utf-8")
@@ -126,6 +127,7 @@ class InInstance(unittest.TestCase):
     def instance(self, with_upstream: bool = True) -> Path:
         inst = self.tmp / "instance"
         self.git(self.tmp, "clone", "-q", str(self.fw), str(inst))
+        self.git(inst, "remote", "set-url", "origin", str(self.tmp / "instance-origin"))  # its own repo
         (inst / ".claude").mkdir()
         (inst / ".claude" / "CLAUDE.md").write_text("# instance\n")
         (inst / "automations" / "tests").mkdir(parents=True)
@@ -161,6 +163,31 @@ class InInstance(unittest.TestCase):
         self.assertIn("framework suites run in the framework's CI; integrity is checked by the gate",
                       r.stderr)
         self.assertEqual(self.run_runner(inst, "--list").stdout.split(), ["automations/tests"])
+
+    def test_an_instance_test_file_inside_a_framework_folder_still_runs(self):
+        inst = self.instance()
+        (inst / "tests" / "test_instance_own.py").write_text(FAILING)
+        self.git(inst, "add", "tests/test_instance_own.py")
+        self.git(inst, "commit", "-q", "-m", "an instance test in a framework folder")
+        self.assertEqual(self.run_runner(inst, "--list").stdout.split(),
+                         ["automations/tests", "tests/test_instance_own.py"])
+        r = self.run_runner(inst)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("FAIL  tests/test_instance_own.py", r.stdout)
+        self.assertIn("skipped the framework's suites pipeline/tests, tests (its framework files)", r.stderr)
+
+    def test_the_framework_repository_tracking_the_contract_still_runs_every_suite(self):
+        # a change to the framework that commits .claude/CLAUDE.md is not an instance
+        (self.fw / ".claude").mkdir()
+        (self.fw / ".claude" / "CLAUDE.md").write_text("# not an instance\n")
+        self.git(self.fw, "add", "-A")
+        self.git(self.fw, "commit", "-q", "-m", "tracks the contract")
+        self.git(self.fw, "remote", "add", "origin", str(self.fw))
+        self.git(self.fw, "remote", "add", "upstream", str(self.fw))
+        self.git(self.fw, "fetch", "-q", "upstream")
+        r = self.run_runner(self.fw, "--list")
+        self.assertEqual(r.stdout.split(), ["pipeline/tests", "tests"])
+        self.assertNotIn("skipped", r.stderr)
 
     def test_without_a_framework_ref_an_instance_runs_everything(self):
         inst = self.instance(with_upstream=False)

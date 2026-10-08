@@ -113,6 +113,28 @@ def _git(*args: str) -> str | None:
         return None
 
 
+def is_own_framework() -> bool:
+    """Is this checkout the framework repository itself, whatever it tracks?
+
+    True when `origin` is the canonical framework, or when `upstream` is the same repository
+    as `origin`. A change to the framework that tracks `.claude/CLAUDE.md` must not turn its
+    own gate into an instance's: scoped to `main`, every file the change adds would escape it.
+    """
+    from ci_framework_ref import CANONICAL_URL, normalise_url
+    origin = _git("remote", "get-url", "origin")
+    if origin is None:
+        return False
+    upstream = _git("remote", "get-url", "upstream")
+    mine = normalise_url(origin)
+    return mine == normalise_url(CANONICAL_URL) or (upstream is not None and mine == normalise_url(upstream))
+
+
+def own_framework_tracking_contract() -> bool:
+    """The framework repository itself, with `.claude/CLAUDE.md` tracked: never an instance."""
+    return (_git("ls-files", "--error-unmatch", ".claude/CLAUDE.md") is not None
+            and is_own_framework())
+
+
 @functools.lru_cache(maxsize=None)
 def framework_scope() -> tuple[str, frozenset[str], frozenset[str]] | None:
     """In an instance: (ref, files, folders) the framework tracks at the last merged commit.
@@ -124,6 +146,8 @@ def framework_scope() -> tuple[str, frozenset[str], frozenset[str]] | None:
     a branch there would escape the gate whenever an `upstream` remote exists.
     """
     if not instance_mode() or _git("ls-files", "--error-unmatch", ".claude/CLAUDE.md") is None:
+        return None
+    if is_own_framework():
         return None
     # An override can only widen the scope: the merge base with upstream/main still counts,
     # so a stale $META_OS_FRAMEWORK_REF cannot hide a file the framework added since.
@@ -539,9 +563,10 @@ def check_instance_paths_untracked(findings: list[Finding]) -> None:
     disjoint: an upgrade is a merge of the framework's paths, and a merge cannot
     touch a path the framework never tracks. This is the check that keeps the
     sets disjoint. Skipped in an instance, where those paths are exactly what is
-    tracked.
+    tracked, but not in the framework repository itself when it tracks the instance
+    contract: that is the very path this check exists to refuse.
     """
-    if instance_mode():
+    if instance_mode() and not own_framework_tracking_contract():
         return
     for n in tracked_instance_paths():
         findings.append(Finding(
@@ -623,9 +648,13 @@ def main() -> None:
 
     if instance_mode() and _git("ls-files", "--error-unmatch", ".claude/CLAUDE.md") is not None:
         scope = framework_scope()
-        print(f"  instance: checking the framework's paths at {scope[0]}" if scope else
-              "  instance: no framework ref (set META_OS_FRAMEWORK_REF or add the `upstream` "
-              "remote) — scope approximated by instance-template/root/")
+        if is_own_framework():
+            print("  framework repository tracking .claude/CLAUDE.md — not an instance: "
+                  "the gate keeps its full scope and refuses that path")
+        else:
+            print(f"  instance: checking the framework's paths at {scope[0]}" if scope else
+                  "  instance: no framework ref (set META_OS_FRAMEWORK_REF or add the `upstream` "
+                  "remote) — scope approximated by instance-template/root/")
     baseline = read_baseline()
     errors, warns = [], []
     for f in findings:

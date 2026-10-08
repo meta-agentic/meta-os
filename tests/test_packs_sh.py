@@ -165,9 +165,16 @@ class PacksShTest(PacksShFixture):
         self.packs("apply")
         shutil.rmtree(self.inst / ".packs" / "alpha")
         (self.inst / ".packs" / "alpha").symlink_to("/nowhere/alpha")
-        r = self.packs("sync", check=False)
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn("dangling mount", r.stderr)
+        links_before = self.links()
+        # the mount itself named, not only a link into it or the recorded pin
+        mount = "dangling mount: .packs/alpha -> /nowhere/alpha"
+        for cmd, needle in ((("check",), mount), (("sync",), mount), (("apply",), mount),
+                            (("config", "alpha"), "dangling mount (.packs/alpha -> /nowhere/alpha)")):
+            with self.subTest(cmd=cmd):
+                r = self.packs(*cmd, check=False)
+                self.assertNotEqual(r.returncode, 0, r.stdout)
+                self.assertIn(needle, r.stderr)
+        self.assertEqual(self.links(), links_before, "a refused sync must not rebuild the links")
 
     def test_check_refuses_a_stale_pin_and_apply_restores_it(self):
         self.manifest("alpha")
@@ -243,6 +250,11 @@ class PacksShTest(PacksShFixture):
         r = run("remove", "beta")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertFalse(gd.exists(), "the worktree's module gitdir must go with the pack")
+        self.assertNotIn("  beta:", (wt / ".packs.yaml").read_text(), "remove drops the manifest entry")
+        self.assertIn("  alpha:", (wt / ".packs.yaml").read_text())
+        for d in ("skills", ".claude/skills"):
+            self.assertFalse(os.path.lexists(wt / d / "beta-one"), f"{d}/beta-one must go with the pack")
+            self.assertTrue((wt / d / "alpha-one").is_symlink(), f"{d}/alpha-one stays")
 
     def test_an_uninitialised_submodule_is_refused_then_apply_initialises_it(self):
         # what a fresh clone or a new worktree holds: the pin recorded, the folder empty

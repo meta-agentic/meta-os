@@ -34,6 +34,10 @@ config:
     doc: "one space; unset means every space"
   workers:
     doc: "a map of workers"
+  enabled:
+    default: "true"
+    one_of: "true | false"
+    doc: "quoted, as YAML needs for a boolean-looking enum"
 """
 
 
@@ -54,7 +58,8 @@ class PacksShConfigTest(PacksShFixture):
         self.packs("apply")
 
     def resolved(self, pack: str = "alpha") -> dict[str, str]:
-        r = self.packs("config", pack)
+        r = self.packs("config", pack, check=False)
+        self.assertEqual(r.returncode, 0, r.stderr)
         self.assertNotIn("warn:", r.stderr)
         return dict(line.split("=", 1) for line in r.stdout.splitlines())
 
@@ -93,6 +98,16 @@ class PacksShConfigTest(PacksShFixture):
         self.assertEqual(r.returncode, 1)
         self.assertIn("alpha.profil", r.stderr)
         self.assertIn("profile=light", r.stdout)            # the default it fell back to, flagged
+
+    def test_a_quoted_default_and_one_of_are_read_without_their_quotes(self):
+        self.configure()
+        self.assertEqual(self.resolved()["enabled"], "true")
+        self.configure("enabled: false")
+        self.assertEqual(self.resolved()["enabled"], "false")
+        self.configure("enabled: maybe")
+        r = self.packs("config", "alpha", check=False)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("alpha.enabled='maybe' not in {true|false}", r.stderr)
 
     def test_validates_an_enum_literally_and_after_dropping_the_comment(self):
         for value, shown in (("l.ght", "l.ght"), ("wrong # nope", "wrong")):

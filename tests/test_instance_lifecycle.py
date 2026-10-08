@@ -178,6 +178,10 @@ class LifecycleTest(unittest.TestCase):
         inst = self.clone_instance()
         out = self.bootstrap(inst, "--dry-run")
         self.assertIn("would create: .claude/CLAUDE.md", out)
+        self.assertIn("would create ", out)
+        self.assertNotIn("  created ", out)
+        self.assertNotIn("is live", out)
+        self.assertIn("Dry run — nothing was written", out)
         self.assertFalse((inst / ".claude" / "CLAUDE.md").exists())
         self.assertEqual(git(inst, "status", "--porcelain"), "")
         self.assertIn("origin", git(inst, "remote"))
@@ -198,8 +202,15 @@ class LifecycleTest(unittest.TestCase):
         self.bootstrap(inst, "--commit")
         # the instance adds its own content at instance paths, including a tracker-key
         # lookalike assembled at run time: the gate must not judge instance paths
+        key = "AB" + "C-" + "42"
         note = inst / "memory" / "raw" / "capture.md"
-        note.write_text("---\ntype: note\n---\nsee " + "AB" + "C-" + "42" + " in the tracker\n")
+        note.write_text("---\ntype: note\n---\nsee " + key + " in the tracker\n")
+        # ...and additions of its own beside the framework's files: a workflow in
+        # .github/workflows/, a top-level folder with no _index.md, a file at the root
+        (inst / ".github" / "workflows" / "estate.yml").write_text(f"name: estate  # {key}\n")
+        (inst / "harness").mkdir()
+        (inst / "harness" / "run.md").write_text(f"# run {key}\n")
+        (inst / "ontology.yaml").write_text(f"types: [{key}]\n")
         git(inst, "add", "-A"); git(inst, "commit", "-q", "-m", "a capture")
         r = run(["python3", "scripts/validate_framework.py"], inst, check=False)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -288,6 +299,7 @@ class LifecycleTest(unittest.TestCase):
         r = run(["scripts/upgrade.sh"], inst, check=False)
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("not bootstrapped", r.stderr)
+        self.assertIn("--adopt", r.stderr)          # the way in for an instance with its own history
 
 
 if __name__ == "__main__":

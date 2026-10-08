@@ -16,6 +16,9 @@
 #     are listed in $GIT_DIR/info/exclude by sync itself, .claude/{skills,agents,hooks}/
 #     are ignored by the framework's .gitignore (no generated artifact is
 #     version-controlled)
+#   - sync also copies the instance's own ignore rules (.gitignore.instance) into the same
+#     $GIT_DIR/info/exclude — the root .gitignore is the framework's, so that file is the
+#     instance's extension point for root-level rules (systems/distribution.md)
 #
 # This is the framework's single home of the script. Earlier it was vendored per instance
 # from the instance template, and the fixes an instance made to its copy (pin enforcement,
@@ -259,13 +262,20 @@ union_plan() {
 # is exactly right — the framework cannot name them, an instance must not commit them).
 EXCLUDE_BEGIN="# >>> meta-os scripts/packs.sh — generated pack links in skills/ (do not edit) >>>"
 EXCLUDE_END="# <<< meta-os scripts/packs.sh <<<"
+INSTANCE_IGNORE=.gitignore.instance
+IGNORE_BEGIN="# >>> meta-os scripts/packs.sh — copied from $INSTANCE_IGNORE (edit that file, then sync) >>>"
+IGNORE_END="# <<< meta-os $INSTANCE_IGNORE <<<"
 exclude_generated() {
   local f; f=$(git rev-parse --git-path info/exclude 2>/dev/null) || return 0
   mkdir -p "$(dirname "$f")"; [ -f "$f" ] || : > "$f"
-  { awk -v b="$EXCLUDE_BEGIN" -v e="$EXCLUDE_END" '$0==b{skip=1;next} $0==e{skip=0;next} !skip' "$f"
+  { awk -v b="$EXCLUDE_BEGIN" -v e="$EXCLUDE_END" -v ib="$IGNORE_BEGIN" -v ie="$IGNORE_END" \
+        '$0==b||$0==ib{skip=1;next} $0==e||$0==ie{skip=0;next} !skip' "$f"
     echo "$EXCLUDE_BEGIN"
     union_plan | while IFS=$'\t' read -r name _; do echo "/skills/$name"; done
     echo "$EXCLUDE_END"
+    if [ -f "$INSTANCE_IGNORE" ]; then
+      echo "$IGNORE_BEGIN"; cat "$INSTANCE_IGNORE"; echo; echo "$IGNORE_END"
+    fi
   } > "$f.tmp" && mv "$f.tmp" "$f"
 }
 union_drift() { # skills/ links must match the plan, names and targets
@@ -294,6 +304,9 @@ cmd_sync() {
   exclude_generated
   n=$(find skills -maxdepth 1 -mindepth 1 -type l | wc -l | tr -d ' ')
   echo "skills/ — $(find skills -maxdepth 1 -mindepth 1 -type d | wc -l | tr -d ' ') framework/instance skills, $n pack links (generated, excluded from git)"
+  if [ -f "$INSTANCE_IGNORE" ]; then
+    echo "$INSTANCE_IGNORE — $(grep -cv '^[[:space:]]*\(#\|$\)' "$INSTANCE_IGNORE" || true) instance ignore rule(s) applied via info/exclude"
+  fi
   sync_claude
   refuse_dangling dangling_links
 }

@@ -21,7 +21,10 @@
 # claude-flow runtime state — operational, not knowledge
 .claude-flow/
 .swarm/
+# Agent memory indexes (AgentDB, HNSW): per-machine, rebuilt on demand, never source.
 agentdb.rvf*
+hnsw.index
+hnsw.metadata.json
 
 # Claude Code project surface — INSTANCE-owned in the one-repository layout
 # (systems/distribution.md; the old wholesale ignore was narrowed on purpose). The
@@ -40,6 +43,10 @@ instance.config.json
 # The pack links scripts/packs.sh sync places in skills/ beside the framework's own skill
 # folders are generated too; sync lists them in $GIT_DIR/info/exclude per clone, since a
 # .gitignore rule cannot tell a generated link from a framework folder of the same shape.
+
+# This file is the framework's and an upgrade replaces it. An instance's own root-level
+# rules go in .gitignore.instance, which sync copies into $GIT_DIR/info/exclude too
+# (systems/distribution.md, "Extension points").
 
 # Agent memory store (local, per-machine). Binary SQLite plus its WAL
 # sidecars cannot be shared between clones, and concurrent sessions conflict

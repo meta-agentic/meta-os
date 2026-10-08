@@ -106,10 +106,12 @@ An upgrade can only change framework paths, because the framework never tracks a
 instance path and the gate in `scripts/validate_framework.py` refuses it if it ever
 would. Your side of the bargain: never edit a framework path in your instance —
 `upgrade.sh` checks and refuses to merge while one is modified (`--force` to carry the
-edit and resolve the result yourself). A change to `instance-template/` after you
+edit and resolve the result yourself). Your own git hooks and root ignore rules go in `.githooks.d/<hook>/` and `.gitignore.instance`, which the framework's files pick up. A change to `instance-template/` after you
 bootstrapped is reported as a diff, never re-applied over your files. The whole
 arrangement, and why the framework used to be a separate repository, is in
 [`systems/distribution.md`](systems/distribution.md).
+
+An instance that predates this layout — its own history, the framework mounted from a sibling checkout — is adopted once: `git fetch upstream && git show upstream/main:scripts/upgrade.sh | bash -s -- --adopt --dry-run`, then without `--dry-run` (see "Adopting an existing instance" in [`systems/distribution.md`](systems/distribution.md)).
 
 ### Repository map
 

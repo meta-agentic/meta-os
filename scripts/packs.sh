@@ -70,14 +70,18 @@ manifest_names() {
   [ -f "$MANIFEST" ] || return 0
   awk '/^packs:/{inp=1;next} inp && /^  [a-zA-Z0-9_-]+:/{gsub(/[: ]/,"");print}' "$MANIFEST"
 }
-manifest_repo() { # <name> → repo override, if any
+manifest_field() { # <name> <field> → that field of the pack's entry (repo, install, plugin), if any
   [ -f "$MANIFEST" ] || return 0
-  awk -v p="$1" '
+  awk -v p="$1" -v f="$2:" '
     $0 ~ "^  "p":" { inpack=1; next }
     inpack && /^  [a-zA-Z0-9_-]+:/ { inpack=0 }
-    inpack && $1 == "repo:" { print $2; exit }
+    inpack && /^    [a-z]/ && $1 == f { gsub(/"/,"",$2); print $2; exit }   # entry level, not config:
   ' "$MANIFEST"
 }
+# `install: plugin` — the pack is installed as a Claude Code plugin, not mounted: no .packs/
+# submodule and no links; `config` reads its pack.yaml where the plugin is installed.
+is_plugin() { [ "$(manifest_field "$1" install)" = plugin ]; }
+plugin_id() { local id; id=$(manifest_field "$1" plugin); echo "${id:-$(registry_field "$1" plugin)}"; }
 manifest_add() {
   [ -f "$MANIFEST" ] || printf '# Desired packs — reconciled by scripts/packs.sh apply\npacks:\n' > "$MANIFEST"
   grep -q "^  $1:" "$MANIFEST" && return 0
@@ -127,7 +131,7 @@ manifest_config() { # <pack> <key> → configured value, empty if unset
     END { if (inblk && !done) flush() }
   ' "$MANIFEST"
 }
-pack_yaml_field() { # <pack> <key> <default|one_of> → value from the pack's pack.yaml
+pack_yaml_field() { # <pack.yaml> <key> <default|one_of> → value from the pack's manifest
   # Two manifest shapes are accepted, because the contract changed under the packs:
   #   inline map   key: { default: x, one_of: a | b }      ← the original shape
   #   block        key:                                    ← what pack.schema.json
@@ -136,7 +140,7 @@ pack_yaml_field() { # <pack> <key> <default|one_of> → value from the pack's pa
   #                  doc: "…"                                 in a comma-split inline map)
   # Every shipped first-party pack now uses the block form; reading only the inline form
   # resolved every default to empty AND skipped enum validation silently.
-  local f=".packs/$1/pack.yaml"; [ -f "$f" ] || return 0
+  local f="$1"; [ -f "$f" ] || return 0
   awk -v k="  $2:" -v want="$3" '
     function emit(v) { gsub(/[][]/,"",v); sub(/^ +/,"",v); sub(/ +$/,"",v)
                        gsub(/ *\| */,"|",v); sub(/^"/,"",v); sub(/"$/,"",v); print v; exit }
@@ -154,16 +158,23 @@ pack_yaml_field() { # <pack> <key> <default|one_of> → value from the pack's pa
 cmd_config() {
   local pack="${1:?usage: packs.sh config <pack> [key]}" key="${2:-}"
   valid_name "$pack"
-  [ -L ".packs/$pack" ] && [ ! -e ".packs/$pack" ] && die "pack '$pack' is a dangling mount (.packs/$pack -> $(readlink ".packs/$pack")) — refusing"
-  [ -d ".packs/$pack" ] || die "pack '$pack' is not mounted"
-  local schema=".packs/$pack/pack.yaml" keys mkeys
+  local schema=".packs/$pack/pack.yaml" keys mkeys id missing=""
+  if is_plugin "$pack"; then   # never fails for want of the plugin: the instance values still print
+    id=$(plugin_id "$pack")
+    schema=$([ -z "$id" ] || python3 "$(dirname "${BASH_SOURCE[0]}")/plugin_root.py" "$id" 2>/dev/null || true)
+    if [ -n "$schema" ]; then schema="$schema/pack.yaml"; else missing=1
+      echo "warn: plugin '${id:-?}' of pack '$pack' is not installed here — instance values only, no defaults or validation" >&2; fi
+  else
+    [ -L ".packs/$pack" ] && [ ! -e ".packs/$pack" ] && die "pack '$pack' is a dangling mount (.packs/$pack -> $(readlink ".packs/$pack")) — refusing"
+    [ -d ".packs/$pack" ] || die "pack '$pack' is not mounted"
+  fi
   mkeys=$(awk -v p="$pack" '$0~"^  "p":"{ip=1;next} ip&&/^  [a-zA-Z0-9_-]+:/{ip=0;c=0} /^[^ #]/{ip=0;c=0} ip&&/^    config:/{c=1;next} c&&/^      [a-zA-Z]/{k=$1;sub(/:.*/,"",k);print k} c&&/^    [a-zA-Z]/{c=0}' "$MANIFEST")
   if [ -f "$schema" ]; then
     keys=$(awk '/^config:/{c=1;next} c&&/^  [a-zA-Z]/{k=$1;sub(/:.*/,"",k);print k} c&&/^[a-zA-Z]/{c=0}' "$schema")
   else
     keys=$mkeys
   fi
-  if [ -n "$key" ] && ! printf '%s\n' "$keys" | grep -qxF -- "$key"; then
+  if [ -n "$key" ] && [ -z "$missing" ] && ! printf '%s\n' "$keys" | grep -qxF -- "$key"; then
     die "unknown config key '$pack.$key' (known: ${keys//$'\n'/ })"
   fi
   local k v oneof rc=0
@@ -171,11 +182,11 @@ cmd_config() {
     printf '%s\n' "$keys" | grep -qxF -- "$k" || { echo "warn: $pack.$k in $MANIFEST is not a key of $schema" >&2; rc=1; }
   done
   for k in $keys; do
-    v=$(manifest_config "$pack" "$k"); [ -z "$v" ] && v=$(pack_yaml_field "$pack" "$k" default)
+    v=$(manifest_config "$pack" "$k"); [ -z "$v" ] && v=$(pack_yaml_field "$schema" "$k" default)
     if [ -n "$key" ]; then [ "$k" = "$key" ] && printf '%s\n' "$v"; continue; fi
     printf '%s=%s\n' "$k" "$v"
     # one_of is pipe-separated in pack.yaml (commas would break the inline map)
-    oneof=$(pack_yaml_field "$pack" "$k" one_of)
+    oneof=$(pack_yaml_field "$schema" "$k" one_of)
     if [ -n "$v" ] && [ -n "$oneof" ] && ! printf '|%s|' "$oneof" | grep -qF -- "|$v|"; then
       echo "warn: $pack.$k='$v' not in {$oneof}" >&2; rc=1
     fi
@@ -210,7 +221,10 @@ dangling_links() {
 manifest_drift() { # mounts must match the manifest both ways
   local name p
   for name in $(manifest_names); do
-    [ -d ".packs/$name" ] || echo "declared but not mounted: $name (run scripts/packs.sh apply)"
+    if is_plugin "$name"; then
+      [ -n "$(plugin_id "$name")" ] || echo "installed as a plugin but names none: $name (set plugin: <plugin>@<marketplace>)"
+      [ ! -e ".packs/$name" ] || echo "installed as a plugin and also mounted: $name — its skills are discovered twice (git rm .packs/$name)"
+    elif [ ! -d ".packs/$name" ]; then echo "declared but not mounted: $name (run scripts/packs.sh apply)"; fi
   done
   for p in .packs/*; do
     [ -e "$p" ] || [ -L "$p" ] || continue
@@ -411,11 +425,11 @@ cmd_apply() {
   refuse_dangling dangling_packs
   refuse_dangling pin_drift
   for name in $(manifest_names); do
-    if [ ! -d ".packs/$name" ]; then
+    if [ ! -d ".packs/$name" ] && ! is_plugin "$name"; then
       echo "apply: mounting '$name'"
       # Subshell so one pack's die doesn't stop the rest. set -e is off inside a
       # subshell under ||, so judge by the mount itself, not the exit status.
-      ( cmd_add "$name" "$(manifest_repo "$name")" ) || true
+      ( cmd_add "$name" "$(manifest_field "$name" repo)" ) || true
       if [ ! -d ".packs/$name" ]; then echo "apply: '$name' failed — continuing" >&2; failed="$failed $name"; fi
     fi
   done

@@ -2,12 +2,15 @@
 # and by bootstrap-instance's pack-selection step. Contract + curation bar in
 # systems/packs.md. Keep entries flat and grep-parsable (name → fields, two-space
 # indents): the mount script reads this without a YAML library.
+# `plugin:` names the pack's Claude Code plugin (<plugin>@<marketplace>) where it is also
+# published as one: the default for an instance's .packs.yaml entry with `install: plugin`.
 version: 1
 
 packs:
   agile:
     repo: https://github.com/meta-agentic/meta-discipline-agile
     ref: main
+    plugin: meta-discipline-agile@meta-agentic
     description: "Agile delivery discipline (3 skills): agile-process (backlog of record, ceremonies, transitions — transition ledger), agile-swarm (multi-lane sprint execution — lane ledger) and story-estimation (two-axis extension/intension sizing — estimate ledger). First-party, extracted from the framework core."
     provenance: first-party
     license: MIT
@@ -41,6 +44,7 @@ packs:
   advanced-math:
     repo: https://github.com/meta-agentic/meta-discipline-math
     ref: main
+    plugin: meta-discipline-math@meta-agentic
     description: "Advanced-mathematics discipline (12 skills): a rigor spine (mathematical-rigor, dimensional-analysis, hypercomplex-and-geometric-algebra) plus per-branch disciplines — calculus-and-analysis, linear-algebra, probability-and-statistics, number-theory, discrete-mathematics, differential-equations, abstract-algebra, complex-analysis, geometry-and-trigonometry — each emitting a checkable ledger. First-party; the quantitative-rigor wedge from pack-strategy."
     provenance: first-party
     license: MIT
@@ -50,6 +54,7 @@ packs:
   physics:
     repo: https://github.com/meta-agentic/meta-discipline-physics
     ref: main
+    plugin: meta-discipline-physics@meta-agentic
     description: "Physics discipline (16 skills): a method spine (symmetry & conservation, limiting cases, order-of-magnitude, model-building, experimental error), branch disciplines (classical mechanics, electromagnetism, waves, quantum, statistical mechanics & thermodynamics, relativity), and a high-energy tier (QFT, particle physics & the Standard Model, relativistic kinematics, accelerator physics, cosmology) — each emitting a checkable ledger. First-party."
     provenance: first-party
     license: MIT
@@ -60,6 +65,7 @@ packs:
   software-engineering:
     repo: https://github.com/meta-agentic/meta-discipline-swe
     ref: main
+    plugin: meta-discipline-swe@meta-agentic
     description: "Software-engineering discipline as judgment, not process. Ships constrained-generation (make LLM generation reliable by restricting what may be emitted — DSL/schema/typed API — behind a four-condition gate whose default answer is no, plus a validator-closed repair loop); design principles applied in review context (SOLID/GRASP, composition), ADR discipline and design reviews follow. First-party."
     provenance: first-party
     license: MIT
@@ -71,6 +77,7 @@ packs:
   agents:
     repo: https://github.com/meta-agentic/meta-discipline-agents
     ref: main
+    plugin: meta-discipline-agents@meta-agentic
     description: "Agent engineering discipline (7 skills): agent-architecture (the refusal test, the escalation ladder, pattern selection — agent decision record), agent-prompting (prompt as versioned code — prompt version record), agent-skills (declarative procedures, Clarify-Execute-Verify — skill review record), agent-harness (model proposes, code disposes — harness contract), agent-safety (guardrails, threat model, least privilege — threat & permission ledger), agent-evaluation (trajectory grading, CI gates — eval report) and loop-engineering (machine-checkable termination, unattended operation, the self-improving harness — loop charter). Parameterized on an autonomy profile. First-party."
     provenance: first-party
     license: MIT

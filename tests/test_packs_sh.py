@@ -75,6 +75,7 @@ class PacksShFixture(unittest.TestCase):
         self.inst = self.tmp / "inst"
         (self.inst / "scripts").mkdir(parents=True)
         shutil.copy2(PACKS_SH, self.inst / "scripts" / "packs.sh")
+        shutil.copy2(PACKS_SH.with_name("packs_plugin.sh"), self.inst / "scripts" / "packs_plugin.sh")
         (self.inst / "CLAUDE.md").write_text("# framework\n")
         (self.inst / "systems").mkdir()
         (self.inst / "systems" / "packs.yaml").write_text("packs:\n")

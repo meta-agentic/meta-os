@@ -53,17 +53,22 @@ def installed_root(plugin_id: str, project: Path) -> tuple[Path | None, str]:
     if entries is None:
         return None, "not installed here"
     ranked: list[tuple[int, Path]] = []
+    malformed = 0                       # a bad entry is skipped, not allowed to void a good one
     for e in entries if isinstance(entries, list) else [entries]:
         at = e.get("projectPath") if isinstance(e, dict) else None
         if not isinstance(e, dict) or not isinstance(e.get("installPath"), str) or not e["installPath"] \
                 or not (at is None or (isinstance(at, str) and at)):
-            return None, f"malformed entry for it in {record.name}"
-        if at is None:
-            ranked.append((1, Path(e["installPath"])))
-        elif Path(at).resolve() == project:
-            ranked.append((0, Path(e["installPath"])))
+            malformed += 1
+            continue
+        try:
+            if at is None:
+                ranked.append((1, Path(e["installPath"])))
+            elif Path(at).resolve() == project:
+                ranked.append((0, Path(e["installPath"])))
+        except (OSError, ValueError):   # e.g. a NUL in a path
+            malformed += 1
     if not ranked:
-        return None, "not installed for this project"
+        return None, f"malformed entry for it in {record.name}" if malformed else "not installed for this project"
     for _, root in sorted(ranked, key=lambda r: r[0]):
         if (root / "pack.yaml").is_file():
             return root, ""

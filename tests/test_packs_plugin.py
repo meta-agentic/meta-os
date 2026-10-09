@@ -41,7 +41,7 @@ class PluginPackTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.inst = self.tmp / "inst"
         (self.inst / "scripts").mkdir(parents=True)
-        for script in ("packs.sh", "plugin_root.py"):
+        for script in ("packs.sh", "packs_plugin.sh", "plugin_root.py"):
             shutil.copy2(ROOT / "scripts" / script, self.inst / "scripts" / script)
         (self.inst / "CLAUDE.md").write_text("# framework\n")
         (self.inst / "systems").mkdir()
@@ -84,9 +84,9 @@ class PluginPackTest(unittest.TestCase):
     def manifest(self, entry: str):
         (self.inst / ".packs.yaml").write_text("packs:\n  alpha:\n" + entry)
 
-    def packs(self, *args: str, env: dict | None = None) -> subprocess.CompletedProcess:
+    def packs(self, *args: str, env: dict | None = None, cwd: Path | None = None) -> subprocess.CompletedProcess:
         base = {k: v for k, v in os.environ.items() if k != "CLAUDE_PLUGIN_ROOT"}
-        return subprocess.run(["scripts/packs.sh", *args], cwd=self.inst, capture_output=True, text=True,
+        return subprocess.run(["scripts/packs.sh", *args], cwd=cwd or self.inst, capture_output=True, text=True,
                               timeout=120, env={**base, **GIT_ENV, "CLAUDE_CONFIG_DIR": str(self.config_dir),
                                                 **(env or {})})
 
@@ -179,6 +179,38 @@ class PluginPackTest(unittest.TestCase):
         self.manifest("    install: 'plugin'\n    config:\n      profile: full\n")
         self.assertEqual(self.packs("config", "alpha").stdout, "profile=full\nengine=claude\n")
 
+    def test_install_without_a_space_is_read_and_an_empty_install_is_refused(self):
+        self.install()
+        self.manifest("    install:plugin\n    config:\n      profile: full\n")
+        self.assertEqual(self.packs("config", "alpha").stdout, "profile=full\nengine=claude\n")
+        self.manifest("    install:\n    config:\n      profile: full\n")
+        for cmd in ("check", "apply", "config"):
+            r = self.packs(cmd, *(["alpha"] if cmd == "config" else []))
+            self.assertNotEqual(r.returncode, 0, cmd)
+            self.assertIn("unknown install mode for alpha: ''", r.stderr, cmd)
+
+    def test_the_plugin_root_is_read_from_stdout_and_a_helper_failure_is_named(self):
+        self.install()
+        self.manifest("    install: plugin\n    config:\n      profile: full\n")
+        noise = self.tmp / "noise"
+        noise.mkdir()
+        (noise / "sitecustomize.py").write_text("import sys\nprint('interpreter noise', file=sys.stderr)\n")
+        r = self.packs("config", "alpha", env={"PYTHONPATH": str(noise)})
+        self.assertEqual((r.returncode, r.stdout), (0, "profile=full\nengine=claude\n"), r.stderr)
+        (self.inst / "scripts" / "plugin_root.py").write_text("raise RuntimeError('boom')\n")
+        r = self.packs("config", "alpha")
+        self.assertEqual((r.returncode, r.stdout), (0, "profile=full\n"))
+        self.assertIn("scripts/plugin_root.py failed (exit 1): RuntimeError: boom", r.stderr)
+
+    def test_a_malformed_install_record_does_not_void_a_valid_one(self):
+        root = self.install(engine="valid")
+        self.installed["meta-alpha@market"] = [{"installPath": 5}, {"installPath": "/x", "projectPath": "a\u0000b"},
+                                               {"scope": "user", "installPath": str(root)}]
+        self.write_installed()
+        self.manifest("    install: plugin\n")
+        r = self.packs("config", "alpha", "engine")
+        self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "valid\n", ""))
+
     def test_install_inside_the_config_block_is_a_config_value_not_the_install_mode(self):
         self.install()
         self.manifest("    config:\n      install: plugin\n")
@@ -239,22 +271,62 @@ class PluginPackTest(unittest.TestCase):
         self.assertEqual(list((self.inst / ".claude" / "agents").iterdir()), [])
         self.assertIn("also mounted: alpha", self.packs("check").stderr)
 
+    def test_a_leftover_mount_after_a_pull_is_cleaned_by_apply_not_refused(self):
+        """Origin removes the submodule; a clone that pulls keeps the populated dir, untracked."""
+        def g(cwd, *args) -> str:
+            return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True,
+                                  env={**os.environ, **GIT_ENV}).stdout
+        g(self.inst, "add", "CLAUDE.md", "scripts", "systems", "skills/skill-builder")
+        g(self.inst, "commit", "-q", "-m", "framework")
+        self.mounted_then_flipped()
+        self.manifest("    repo: x\n")                    # back to the mount for the first commit
+        g(self.inst, "add", ".packs.yaml"); g(self.inst, "commit", "-q", "-m", "mount")
+        clone = self.tmp / "clone"
+        g(self.tmp, "clone", "-q", "--recurse-submodules", str(self.inst), str(clone))
+        self.assertEqual(self.packs("sync", cwd=clone).returncode, 0)
+        self.assertTrue((clone / "skills" / "alpha-one").is_symlink())
+        # origin: drop the submodule, declare the plugin
+        g(self.inst, "rm", "-q", "-f", ".packs/alpha")
+        shutil.rmtree(self.inst / g(self.inst, "rev-parse", "--git-path", "modules/.packs/alpha").strip(),
+                      ignore_errors=True)                  # an absolute path wins the join
+        self.manifest("    install: plugin\n    config:\n      profile: full\n")
+        g(self.inst, "add", ".packs.yaml"); g(self.inst, "commit", "-q", "-m", "plugin")
+        self.assertEqual(self.packs("apply").returncode, 0)  # origin drops its own stale links
+        self.assertEqual(self.packs("check").returncode, 0, self.packs("check").stderr)
+        # the clone pulls: git cannot rmdir the populated mount and leaves it untracked
+        g(clone, "pull", "-q", "--no-rebase")
+        self.assertTrue((clone / ".packs" / "alpha" / "skills" / "alpha-one" / "SKILL.md").is_file())
+        self.assertEqual(g(clone, "ls-files", "-s", "--", ".packs/alpha"), "")
+        r = self.packs("apply", cwd=clone)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("state matches", r.stdout)
+        self.assertFalse((clone / "skills" / "alpha-one").is_symlink(), "the stale pack link survived apply")
+        r = self.packs("check", cwd=clone)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("warn: .packs/alpha is a leftover of plugin pack alpha", r.stderr)
+        self.assertIn("rm -rf .packs/alpha", r.stderr)
+        shutil.rmtree(clone / ".packs" / "alpha")
+        r = self.packs("check", cwd=clone)
+        self.assertEqual((r.returncode, "leftover" in r.stderr), (0, False), r.stderr)
+
     def test_list_shows_a_plugin_pack_and_remove_refuses_it(self):
         self.manifest("    install: plugin\n    config:\n      profile: full\n")
         self.assertEqual(self.packs("list").stdout,
-                         "alpha  plugin meta-alpha@market  (installed by Claude Code, not mounted)\nno packs mounted\n")
+                         "alpha  plugin meta-alpha@market  (installed by Claude Code, not mounted)\n"
+                         "no packs mounted as submodules\n")
         r = self.packs("remove", "alpha")
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("installed as a plugin: uninstall it with /plugin uninstall meta-alpha@market", r.stderr)
         self.assertIn("profile: full", (self.inst / ".packs.yaml").read_text())
 
-    def test_check_reports_a_plugin_pack_that_is_also_mounted_or_names_no_plugin(self):
+    def test_check_warns_of_an_untracked_leftover_and_reports_a_plugin_pack_naming_none(self):
         (self.inst / ".packs" / "alpha").mkdir(parents=True)
         (self.inst / ".packs" / "alpha" / "pack.yaml").write_text(PACK_YAML.format(v="0", engine="x"))
         self.manifest("    install: plugin\n")
-        r = self.packs("check")
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn("installed as a plugin and also mounted: alpha", r.stderr)
+        r = self.packs("check")                             # no gitlink: a leftover, not a mount
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("warn: .packs/alpha is a leftover of plugin pack alpha", r.stderr)
+        self.assertNotIn("also mounted", r.stderr)
         (self.inst / "systems" / "packs.yaml").write_text("packs:\n")
         shutil.rmtree(self.inst / ".packs")
         r = self.packs("check")

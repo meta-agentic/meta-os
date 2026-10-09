@@ -78,23 +78,10 @@ manifest_field() { # <name> <field> → that field of the pack's entry (repo, in
     inpack && /^    [a-z]/ && $1 == f { gsub(/["\047]/,"",$2); print $2; exit }   # entry level, not config:
   ' "$MANIFEST"
 }
-# `install: plugin` — the pack is installed as a Claude Code plugin, not mounted: no .packs/
-# submodule and no links; `config` reads its pack.yaml where the plugin is installed.
-# `install: submodule` is the default; any other value is refused, never read as a mount.
-install_mode() { local m; m=$(manifest_field "$1" install); echo "${m:-submodule}"; }
-is_plugin() { [ "$(install_mode "$1")" = plugin ]; }
-plugin_id() { local id; id=$(manifest_field "$1" plugin); echo "${id:-$(registry_field "$1" plugin)}"; }
-plugin_drift() { # what check reports and apply refuses on, per install mode
-  local name m
-  for name in $(manifest_names); do
-    m=$(install_mode "$name")
-    if [ "$m" = plugin ]; then
-      [ -n "$(plugin_id "$name")" ] || echo "installed as a plugin but names none: $name (set plugin: <plugin>@<marketplace>)"
-      if [ -e ".packs/$name" ] || [ -n "$(git ls-files -s -- ".packs/$name" 2>/dev/null)" ]; then
-        echo "installed as a plugin and also mounted: $name — its skills are discovered twice (git rm .packs/$name)"; fi
-    elif [ "$m" != submodule ]; then echo "unknown install mode for $name: '$m' (plugin, or submodule — the default)"; fi
-  done
-}
+# A pack installed as a Claude Code plugin (`install: plugin`): install_mode, is_plugin,
+# plugin_id, plugin_drift, plugin_pack_yaml, plugin_list, not_a_plugin.
+# shellcheck source=scripts/packs_plugin.sh
+. "$(dirname "${BASH_SOURCE[0]}")/packs_plugin.sh"
 manifest_add() {
   [ -f "$MANIFEST" ] || printf '# Desired packs — reconciled by scripts/packs.sh apply\npacks:\n' > "$MANIFEST"
   grep -q "^  $1:" "$MANIFEST" && return 0
@@ -171,15 +158,13 @@ pack_yaml_field() { # <pack.yaml> <key> <default|one_of> → value from the pack
 cmd_config() {
   local pack="${1:?usage: packs.sh config <pack> [key]}" key="${2:-}"
   valid_name "$pack"
-  local schema=".packs/$pack/pack.yaml" keys mkeys id missing=""
-  case "$(install_mode "$pack")" in plugin|submodule) ;; *) die "$(plugin_drift | grep -F "for $pack:")" ;; esac
+  local schema=".packs/$pack/pack.yaml" keys mkeys missing=""
+  [[ "$(install_mode "$pack")" =~ ^(plugin|submodule)$ ]] || die "$(plugin_drift config | grep -F "for $pack:")"
   if is_plugin "$pack"; then   # never fails for want of the plugin: the instance values still print
-    id=$(plugin_id "$pack"); schema="names no plugin"
-    if [ -n "$id" ]; then command -v python3 >/dev/null && schema=$(python3 "$(dirname "${BASH_SOURCE[0]}")/plugin_root.py" "$id" 2>&1) || schema="python3 not found"; fi
-    if [ -f "$schema/pack.yaml" ]; then schema="$schema/pack.yaml"; else missing=1
-      echo "warn: plugin '${id:-?}' of pack '$pack': ${schema:-not installed here} — instance values only, no defaults or validation" >&2; schema=""; fi
+    schema=$(plugin_pack_yaml "$pack"); [ -n "$schema" ] || missing=1
   else
-    [ -L ".packs/$pack" ] && [ ! -e ".packs/$pack" ] && die "pack '$pack' is a dangling mount (.packs/$pack -> $(readlink ".packs/$pack")) — refusing"
+    [ -L ".packs/$pack" ] && [ ! -e ".packs/$pack" ] \
+      && die "pack '$pack' is a dangling mount (.packs/$pack -> $(readlink ".packs/$pack")) — refusing"
     [ -d ".packs/$pack" ] || die "pack '$pack' is not mounted"
   fi
   mkeys=$(awk -v p="$pack" '$0~"^  "p":"{ip=1;next} ip&&/^  [a-zA-Z0-9_-]+:/{ip=0;c=0} /^[^ #]/{ip=0;c=0} ip&&/^    config:/{c=1;next} c&&/^      [a-zA-Z]/{k=$1;sub(/:.*/,"",k);print k} c&&/^    [a-zA-Z]/{c=0}' "$MANIFEST")
@@ -234,9 +219,10 @@ dangling_links() {
 }
 manifest_drift() { # mounts must match the manifest both ways
   local name p
-  plugin_drift
+  plugin_drift check
   for name in $(manifest_names); do
-    [ "$(install_mode "$name")" != submodule ] || [ -d ".packs/$name" ] || echo "declared but not mounted: $name (run scripts/packs.sh apply)"
+    [ "$(install_mode "$name")" != submodule ] || [ -d ".packs/$name" ] \
+      || echo "declared but not mounted: $name (run scripts/packs.sh apply)"
   done
   for p in .packs/*; do
     [ -e "$p" ] || [ -L "$p" ] || continue
@@ -402,7 +388,7 @@ cmd_add() {
 cmd_remove() {
   local name="${1:?usage: packs.sh remove <name>}"
   valid_name "$name"
-  ! is_plugin "$name" || die "pack '$name' is installed as a plugin: uninstall it with /plugin uninstall $(plugin_id "$name"), then drop its entry from $MANIFEST (a leftover mount: git rm .packs/$name)"
+  not_a_plugin "$name"
   [ -d ".packs/$name" ] || die "pack '$name' is not mounted"
   if [ ! -L ".packs/$name" ] && [ -e ".packs/$name/.git" ] && [ -n "$(git -C ".packs/$name" status --porcelain 2>/dev/null)" ]; then
     die "pack '$name' has local changes that deinit -f would discard — refusing (git -C .packs/$name status)"
@@ -422,7 +408,7 @@ DEFER_SYNC=0   # apply sets it: one union rebuild at the end, not one per pack
 cmd_apply() {
   local name p failed=""
   DEFER_SYNC=1
-  refuse_found "$(plugin_drift)"   # a plugin pack is never mounted back, an unknown mode never guessed
+  refuse_found "$(plugin_drift apply)"   # a plugin pack is never mounted back, an unknown mode never guessed
   # A fresh clone or worktree carries the pins as empty dirs, and a pull or branch switch
   # can move a gitlink under an initialised mount: check both out at their recorded pin.
   for name in $(manifest_names); do
@@ -475,10 +461,10 @@ cmd_update() {
 }
 
 cmd_list() {
-  local p pname pin n
-  for pname in $(manifest_names); do is_plugin "$pname" && echo "$pname  plugin $(plugin_id "$pname")  (installed by Claude Code, not mounted)"; done
+  local p pname pin n plugins
+  plugins=$(plugin_list); [ -z "$plugins" ] || echo "$plugins"
   for p in .packs/*/; do
-    [ -d "$p" ] || { echo "no packs mounted"; return; }
+    [ -d "$p" ] || { echo "no packs mounted${plugins:+ as submodules}"; return; }
     pname=$(basename "$p")
     pin=$(git -C "$p" rev-parse --short HEAD 2>/dev/null || echo "?")
     n=$(pack_skill_dirs ".packs/$pname" | wc -l | tr -d ' ')

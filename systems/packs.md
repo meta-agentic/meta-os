@@ -90,6 +90,21 @@ as-is.
 - Machine-global discovery (`~/.claude/skills/<name>`) remains available and chains
   through `skills/` to wherever the skill really lives — a framework folder or a pack link.
 
+## Installing a pack as a plugin
+
+The first-party packs are also published as Claude Code plugins, through the `meta-agentic` marketplace (repository `meta-agentic/meta-disciplines`). Each plugin carries its pack repository's name: `meta-discipline-agents`, `meta-discipline-agile`, `meta-discipline-math`, `meta-discipline-physics`, `meta-discipline-swe`. Installing one takes two commands in a session:
+
+```text
+/plugin marketplace add meta-agentic/meta-disciplines
+/plugin install meta-discipline-agile@meta-agentic
+```
+
+A plugin install leaves nothing in the checkout: no `.packs/<name>` submodule and no link in `skills/`, so `scripts/packs.sh list` does not show it and no pin enters the instance's history.
+
+**What the gate trusts is the registry, whichever way a pack arrives.** A skill catalogued in `skills/_index.md` resolves when it has a folder in `skills/` (the framework's own, or the link a mount places), or when a pack the registry lists with `status: available` names it in `provides:`. The second rule is what lets a catalogued pack skill resolve in the framework repository, which mounts nothing, and in a checkout that gets its packs as plugins. A name no installable pack provides is still `index-phantom`; a `planned` pack provides nothing, since `packs.sh add` refuses to mount it.
+
+**A pack installed both ways is discovered twice.** The plugin's skills are namespaced by the plugin (`meta-discipline-agile:agile-process`), the mount's are not (`agile-process`, through `skills/` and `.claude/skills/`), so a session lists both, and the two copies are pinned independently: the plugin by the version installed from the marketplace, the mount by its submodule commit.
+
 ## The registry — [[systems/packs.yaml|packs.yaml]]
 
 The curated list offered at bootstrap ([[skills/bootstrap-instance/SKILL|bootstrap-instance]]

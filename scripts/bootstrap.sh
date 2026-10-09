@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
 # First run of a meta-os checkout: turn it into YOUR instance.
 #
-# One repository, two owners split by path (systems/distribution.md). This script copies
-# instance-template/root/ to the repository root — path for path, never overwriting —
-# fills the placeholders, points the remotes the right way round (the framework becomes
-# the fetch-only `upstream`), mounts the packs you ask for and builds the engine's
+# The framework and your instance are two repositories; the instance's tree holds the
+# framework's paths beside its own, split by path (systems/distribution.md). This script
+# copies instance-template/root/ to the repository root — path for path, never
+# overwriting — fills the placeholders, points the remotes the right way round (the
+# framework becomes the fetch-only `upstream`, fetched here), mounts the packs you ask
+# for, initialises the pinned ones (scripts/packs.sh apply) and builds the engine's
 # discovery links. Re-running it is safe: every step reports what already exists and
 # changes nothing there.
+#
+# A second checkout of an existing instance (a new machine, a container) is a clone of
+# the INSTANCE's repository, then this script. Its .claude/CLAUDE.md is committed, so no
+# template file is created there: a template file the instance does not have is one it
+# removed, and the template is instantiated once, never re-applied.
 #
 #   scripts/bootstrap.sh                         # interactive on a terminal, defaults otherwise
 #   scripts/bootstrap.sh --yes --name acme-os    # headless: every answer from flags/defaults
@@ -65,6 +72,10 @@ cd "$root"
 [ -x scripts/packs.sh ] || die "scripts/packs.sh is missing or not executable"
 
 bootstrapped=0; [ -f .claude/CLAUDE.md ] && bootstrapped=1
+# Committed: the instance's own history carries its contract. An uncommitted first run
+# (interrupted, or not committed yet) still fills its gaps on a re-run.
+committed=0
+if [ "$bootstrapped" = 1 ] && git ls-files --error-unmatch .claude/CLAUDE.md >/dev/null 2>&1; then committed=1; fi
 
 # --- answers ----------------------------------------------------------------------
 interactive=0; [ "$yes" = 0 ] && [ -t 0 ] && interactive=1
@@ -113,11 +124,13 @@ say "meta-os bootstrap — instance '$name' in $root"
 # --- 1. instantiate the template ------------------------------------------------------
 say ""
 say "1. Instance files from $TEMPLATE/"
-created=0 kept=0 created_list=""
+created=0 kept=0 created_list="" absent_list=""
 while IFS= read -r rel; do
   rel="${rel#./}"
   if [ -e "$rel" ] || [ -L "$rel" ]; then
     kept=$((kept+1))
+  elif [ "$committed" = 1 ]; then
+    absent_list="$absent_list $rel"
   else
     created=$((created+1)); created_list="$created_list $rel"
     if [ "$dry" = 1 ]; then say "  would create: $rel"
@@ -130,6 +143,11 @@ while IFS= read -r rel; do
 done < <(cd "$TEMPLATE" && find . \( -type f -o -type l \) | LC_ALL=C sort)
 if [ "$dry" = 1 ]; then say "  would create $created, kept $kept already present"
 else say "  created $created, kept $kept already present"; fi
+if [ -n "$absent_list" ]; then
+  say "  not recreated — this instance is committed and does not have them (the template is"
+  say "  instantiated once, never re-applied; scripts/upgrade.sh --check reports its changes):"
+  for rel in $absent_list; do say "    $rel"; done
+fi
 if [ "$local_mode" = 1 ] && [ "$dry" = 0 ]; then
   ex=$(git rev-parse --git-path info/exclude); mkdir -p "$(dirname "$ex")"; [ -f "$ex" ] || : > "$ex"
   marker="# >>> meta-os scripts/bootstrap.sh --local — instance files of a developer checkout >>>"
@@ -160,6 +178,11 @@ else
     run git remote add upstream "$upstream"
   fi
   run git remote set-url --push upstream no_push
+  # The gate reads the framework's paths from upstream/main; unfetched, it judges the
+  # instance's own files. A failed fetch (offline) is reported, not fatal.
+  if [ "$dry" = 1 ]; then say "  would: git fetch upstream"
+  elif git fetch -q upstream; then say "  fetched upstream"
+  else say "  warn: could not fetch upstream — run 'git fetch upstream' before scripts/validate_framework.py"; fi
   if [ -n "$origin" ]; then
     if has_remote origin; then say "  origin: $(git remote get-url origin) (already configured; --origin ignored)"
     else say "  origin (your private remote): $origin"; run git remote add origin "$origin"; fi
@@ -179,7 +202,11 @@ if [ -n "$packs" ]; then
     else say "  mounting pack '$pk'"; run scripts/packs.sh add "$pk"; fi
   done
 fi
-if [ "$dry" = 1 ]; then say "  would: scripts/packs.sh sync"; else scripts/packs.sh sync | sed 's/^/  /'; fi
+# apply, not sync: a fresh clone carries the pinned packs as empty folders, which sync
+# refuses and apply initialises at their pins. Developer mode keeps sync: its mounts
+# are not the manifest's to reconcile.
+packs_cmd=apply; [ "$local_mode" = 1 ] && packs_cmd=sync
+if [ "$dry" = 1 ]; then say "  would: scripts/packs.sh $packs_cmd"; else scripts/packs.sh "$packs_cmd" | sed 's/^/  /'; fi
 
 # --- 4. dashboard (optional) ---------------------------------------------------------------
 if [ -n "$dashboard" ]; then
@@ -212,7 +239,7 @@ fi
 # --- done ---------------------------------------------------------------------------------------
 say ""
 if [ "$dry" = 1 ]; then say "Dry run — nothing was written. Re-run without --dry-run to instantiate '$name'."; exit 0
-elif [ "$bootstrapped" = 1 ] && [ "$created" = 0 ]; then say "Already bootstrapped — nothing changed."; else say "Instance '$name' is live."; fi
+elif [ "$bootstrapped" = 1 ] && [ "$created" = 0 ]; then say "Already bootstrapped — no instance file created."; else say "Instance '$name' is live."; fi
 say "Next:"
 say "  - open $root as your Obsidian vault; start at _index.md"
 say "  - in Claude Code, run the bootstrap-instance skill for the guided first conversation"

@@ -25,10 +25,16 @@ optional. (After chaseAI's Agentic OS; memory flow after Karpathy's LLM-wiki.)
 | **2 · Memory** | memory (instance; its skeleton ships in `instance-template/root/memory`) | Knowledge base. Karpathy flow: `raw → wiki → output`. |
 | **3 · Interface** | (build last) | Obsidian graph + optional dashboard, only after 1 & 2 are stable. |
 
-## Framework vs. instance — one repository, two owners
+## Framework vs. instance — two repositories, one tree split by path
+
+The framework (this public repository) and each instance (a private repository of its
+own) are **two repositories**. An instance starts as a clone of this one and keeps
+merging it, so its tree holds the framework's paths beside its own. Commits cross one
+way only: the instance fetches the framework as its `upstream` (push URL `no_push`) and
+never sends anything back.
 
 ```
-<instance>/  (a clone of this repo — open THIS as the vault)
+<instance>/  (your private repo, cloned from this one — open THIS as the vault)
 ├── CLAUDE.md          ← this contract                        ┐
 ├── skills/            ← the skill library                    │
 ├── systems/           ← how the OS operates                  │ FRAMEWORK paths —

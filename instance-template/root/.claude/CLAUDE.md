@@ -5,9 +5,10 @@
      delete the TODO comments. The framework contract is the root CLAUDE.md; Claude Code
      loads both (./CLAUDE.md and ./.claude/CLAUDE.md are both project instructions). -->
 
-This checkout is **one repository with two owners, split by path**. The framework
-arrives and updates through `scripts/upgrade.sh` and is never edited here; the instance
-is everything else and is never touched by an upgrade.
+This checkout is **your private repository, holding the framework's paths beside your
+own**. The framework is a separate public repository, fetched as `upstream` and never
+pushed to; it arrives and updates through `scripts/upgrade.sh` and is never edited here.
+The instance is everything else and is never touched by an upgrade.
 
 ```
 {{instance-name}}/                 ← open THIS folder as the Obsidian vault

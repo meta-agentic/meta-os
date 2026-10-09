@@ -31,6 +31,9 @@ ROOT = Path(__file__).resolve().parents[1]
 GIT_ENV = {
     "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
     "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid",
+    # a fixture pack is a local repository, mounted as a submodule from a path
+    "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "protocol.file.allow",
+    "GIT_CONFIG_VALUE_0": "always",
     "GIT_CONFIG_NOSYSTEM": "1", "HOME": tempfile.gettempdir(),
 }
 
@@ -173,6 +176,51 @@ class LifecycleTest(unittest.TestCase):
         self.assertIn("Already bootstrapped", out)
         self.assertEqual(before, git(inst, "rev-parse", "HEAD"))
         self.assertEqual(git(inst, "status", "--porcelain"), "")
+
+    def test_an_uncommitted_first_bootstrap_fills_its_gaps_on_a_rerun(self):
+        inst = self.clone_instance()
+        self.bootstrap(inst)
+        (inst / "_index.md").unlink()
+        out = self.bootstrap(inst)
+        self.assertIn("created 1,", out)
+        self.assertTrue((inst / "_index.md").is_file())
+        self.assertNotIn("not recreated", out)
+
+    def test_a_second_checkout_of_a_committed_instance_bootstraps_clean(self):
+        # A new machine clones the INSTANCE's repository: its pinned pack arrives as an
+        # empty folder, it has no upstream remote, and a template file the instance
+        # removed is missing on purpose. Bootstrap must finish, fetch the framework,
+        # initialise the pack, recreate nothing, and leave the gate green.
+        pack = self.tmp / "src" / "demo"
+        (pack / "skills" / "demo-skill").mkdir(parents=True)
+        (pack / "skills" / "demo-skill" / "SKILL.md").write_text(
+            "---\nname: demo-skill\ndescription: fixture\n---\n# demo\n")
+        (pack / "pack.yaml").write_text("name: demo\nversion: 0.1.0\ndescription: fixture\n")
+        git(pack, "init", "-q", "-b", "main")
+        git(pack, "add", "-A"); git(pack, "commit", "-q", "-m", "pack")
+        first = self.clone_instance("first")
+        self.bootstrap(first, "--commit")
+        run(["scripts/packs.sh", "add", "demo", str(pack)], first)
+        git(first, "rm", "-q", ".githooks.d/README.md")
+        git(first, "add", "-A"); git(first, "commit", "-q", "-m", "mount a pack, drop a template file")
+        origin = self.tmp / "instance-origin.git"
+        git(self.tmp, "clone", "-q", "--bare", str(first), str(origin))
+
+        second = self.tmp / "second"
+        git(self.tmp, "clone", "-q", str(origin), str(second))
+        self.assertEqual(list((second / ".packs" / "demo").iterdir()), [])   # the clone's empty pin
+        self.assertNotIn("upstream", git(second, "remote"))
+        out = self.bootstrap(second)
+        self.assertIn("not recreated", out)
+        self.assertIn(".githooks.d/README.md", out)
+        self.assertFalse((second / ".githooks.d" / "README.md").exists())
+        self.assertIn("fetched upstream", out)
+        self.assertEqual(git(second, "rev-parse", "upstream/main"), self.v1)
+        self.assertTrue((second / ".packs" / "demo" / "pack.yaml").is_file())
+        self.assertTrue((second / ".claude" / "skills" / "demo-skill").is_symlink())
+        self.assertEqual(git(second, "status", "--porcelain"), "")
+        r = run(["python3", "scripts/validate_framework.py"], second, check=False)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
     def test_bootstrap_dry_run_writes_nothing(self):
         inst = self.clone_instance()

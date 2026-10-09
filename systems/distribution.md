@@ -2,15 +2,19 @@
 type: system
 tags: [os, system, distribution]
 ---
-# Distribution — one repository, two owners
+# Distribution — two repositories, one tree split by path
 
-An instance of the OS **is a clone of this repository**. The framework and the instance
-share one git history and own **disjoint paths**: the framework's folders arrive and
-update by merge, the instance's folders are instantiated once on first run and never
-touched by the framework again. Setting up is one clone and one script; updating is one
-script. This note is the standing answer to how an instance consumes the framework, why
-the separation that used to be two repositories now runs *inside* one, and what each
-side may and may not do.
+The framework and an instance are **two repositories**: this one, public, and the
+instance's own, private from its first commit. An instance **starts as a clone of this
+repository**, so its history holds the framework's and its tree holds the framework's
+paths beside its own. Commits cross one way only: the instance fetches the framework as
+its `upstream`, whose push URL is `no_push`, and merges it; nothing is ever pushed back.
+Inside the instance the two sides own **disjoint paths**: the framework's folders arrive
+and update by merge, the instance's folders are instantiated once on first run and
+never touched by the framework again. Setting up is one clone and one script; updating
+is one script. This note is the standing answer to how an instance consumes the
+framework, why the separation that used to be two unrelated histories now runs *inside*
+the instance's one tree, and what each side may and may not do.
 
 ## The invariant
 
@@ -51,14 +55,18 @@ scripts/bootstrap.sh            # interactive on a terminal; --yes takes every d
 1. **Instantiates** `instance-template/root/` at the repository root — path for path,
    only where the path does not exist yet — and fills the placeholders
    (`{{instance-name}}`, `{{bootstrapped}}`, `{{template-ref}}`) in the copies.
-   [[instance-template/_index|instance-template/]] documents the payload.
+   [[instance-template/_index|instance-template/]] documents the payload. In an
+   instance whose `.claude/CLAUDE.md` is committed it creates nothing: a template file
+   missing there is one the instance removed, and is listed as *not recreated*.
 2. **Points the remotes the right way round.** The clone's `origin` is the public
    framework, so it becomes `upstream` with its push URL set to `no_push`: the
    framework is fetched, never pushed to, and a wrong `git push` fails instead of
-   leaking an estate. Your private remote is added as `origin` (`--origin <url>`, or
-   later by hand).
-3. **Mounts packs** (`--packs agile,…` from [[systems/packs.yaml|the registry]]) and
-   **builds the discovery links**: pack skills linked into `skills/` beside the
+   leaking an estate. `upstream` is then fetched, because the framework gate reads the
+   framework's paths from `upstream/main` (offline, it warns and says what to run).
+   Your private remote is added as `origin` (`--origin <url>`, or later by hand).
+3. **Mounts packs** (`--packs agile,…` from [[systems/packs.yaml|the registry]]),
+   initialises the pinned ones with `scripts/packs.sh apply`, and **builds the
+   discovery links**: pack skills linked into `skills/` beside the
    framework's own, the whole of `skills/` mirrored into `.claude/skills/`. Generated,
    never committed — `scripts/packs.sh sync` lists its links in `.git/info/exclude`,
    the framework's `.gitignore` covers `.claude/{skills,agents,hooks}/`.
@@ -74,6 +82,23 @@ Headless installs pass every answer as a flag (`--yes --name acme --packs agile
 conversation — backlog model, first project, GitHub wiring — stays with the
 [[skills/bootstrap-instance/SKILL|bootstrap-instance]] skill, which calls this script
 for the mechanical part.
+
+## A second checkout of an instance
+
+A new machine or a container clones the **instance's** repository, not the framework's,
+and runs the same script:
+
+```bash
+git clone <your private instance repository> my-os && cd my-os
+scripts/bootstrap.sh --yes      # adds and fetches upstream, initialises the pinned packs
+git config core.hooksPath .githooks
+```
+
+The clone has `origin` only, its pinned packs are empty folders, and its
+`.claude/CLAUDE.md` is committed. Bootstrap adds `upstream` and fetches it, runs
+`scripts/packs.sh apply` to check the packs out at their pins, and creates no instance
+file (step 1). Without `upstream/main` the framework gate cannot tell the framework's
+paths from the instance's, and reports the instance's own files.
 
 ## Updating
 
@@ -170,7 +195,7 @@ flowchart TD
 
 The run ends with an error, never with "done", if the fetched framework commit lacks the adoption scripts, if `scripts/packs.sh sync` or the framework gate fails, or if the run left a file changed or untracked that was not so before (compared per file, so the operator's own untracked files never count). A failure after the merge commit says so, with the commit to reset to. The changes are one preparatory commit; then the framework is merged with `--allow-unrelated-histories`. That merge cannot conflict — every path the framework tracks is now absent from the instance or identical to the framework's — so the instance's own paths come through it untouched. Both commits are made without hooks (the gate runs explicitly after the merge). If anything fails on the way — a commit a signing setup refuses, a merge git cannot start — the run rolls back on its own: HEAD and the index return to the pre-adoption commit, removed links and identical copies are recreated, backed-up files and a moved-aside submodule (checkout and repository) are put back in place, and a re-run starts clean. The rollback then compares the repository with its state before the run, covering HEAD, index, status, `git submodule status` and every mount resolving. It says "verified unchanged" only when they match; otherwise it names what to finish by hand. After a successful run, `git reset --hard <pre-adoption commit>`, printed by the run, undoes the whole adoption. From then on there is a merge base, and `scripts/upgrade.sh` is an ordinary upgrade.
 
-## Why one repository — and what changed since it was rejected
+## Why one tree — and what changed since it was rejected
 
 An earlier version of this note rejected the merged repository on four grounds. Each
 was an argument against *a live merge of unowned paths*; the ownership rules above

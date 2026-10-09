@@ -29,12 +29,12 @@ and debt that gets paid off can never quietly come back (removing its baseline
 line is a reviewable diff). Two classes opt out of the ratchet entirely — see
 `BASELINEABLE` below.
 
-One repository, two owners
---------------------------
+Framework paths, instance paths
+-------------------------------
 Since the instance template was folded in (`systems/distribution.md`), a
 checkout is either the framework itself or a bootstrapped *instance* of it —
-the same repository, with the instance's files added at paths the framework
-never tracks. This gate therefore scopes itself to the framework's own paths
+a private repository holding the framework's tree, with the instance's files
+added at paths the framework never tracks. This gate therefore scopes itself to the framework's own paths
 and refuses, in the framework, any tracked file at an instance path. The
 instance paths are not a hand-kept list: they are read from
 `instance-template/root/`, the payload `scripts/bootstrap.sh` instantiates.

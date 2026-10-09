@@ -159,6 +159,17 @@ class IndexResolvesTest(unittest.TestCase):
                          ["entry 'beta' does not resolve — no skills/beta/SKILL.md "
                           "(pack 'agile' is mounted and does not ship it)"])
 
+    def test_an_earlier_phantom_does_not_hide_a_later_one_from_a_mounted_pack(self):
+        # `aaa-ghost` sorts first and is a phantom; `beta` after it must still be judged against
+        # the mounted packs, not resolved from the registry as if `agile` were unmounted
+        mount = self.tmp / ".packs" / "agile" / "skills" / "alpha"
+        mount.mkdir(parents=True)
+        (mount / "SKILL.md").write_text("---\nname: alpha\n---\n")
+        (self.skills / "alpha").symlink_to(mount)
+        self.catalog("core-skill", "aaa-ghost", "alpha", "beta")
+        phantoms, provided = self.phantoms()
+        self.assertEqual((phantoms, provided), ({"aaa-ghost", "beta"}, {}))
+
     def test_the_pack_provided_table_is_catalogued(self):
         (self.skills / "_index.md").write_text(
             "## Core\n\n| Skill | Use |\n|---|---|\n"

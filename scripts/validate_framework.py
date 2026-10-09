@@ -69,6 +69,7 @@ PROVENANCE = ROOT / "PROVENANCE.md"
 SYSTEMS_DIR = ROOT / "systems"
 ONTOLOGY = SYSTEMS_DIR / "ontology.yaml"
 PACKS_REGISTRY = SYSTEMS_DIR / "packs.yaml"
+PACKS_DIR = ROOT / ".packs"
 BASELINE = ROOT / "scripts" / "framework-baseline.txt"
 
 INDEX_NAME = "_index.md"
@@ -250,6 +251,8 @@ BASELINEABLE = {
     "skill-provenance": True,
     "skill-index": True,
     "index-phantom": True,
+    "index-pack-table": True,
+    "pack-registry": True,
     "systems-front-matter": True,
     "folder-index": True,
     "count-assertion": True,
@@ -336,30 +339,28 @@ def index_entries() -> set[str]:
     Three shapes are catalogued there and all count as an entry:
       * core table  — a `[[skills/<name>/SKILL|…]]` wikilink;
       * pack-provided table — the backticked name in the first cell of a row under a
-        `## Pack-provided …` heading (a pack skill has no folder here to link to);
+        `## Pack-provided …` heading (a pack skill has no folder here to link to; read,
+        and its malformed rows reported, by scripts/pack_registry.py);
       * library table — a family row. A family cell ending in `-` (after the
         bold markers are stripped, e.g. `**agentdb-***`) is a PREFIX expanded
         over the `·`-separated members in the second cell; anything else (e.g.
         `**misc**`) lists the members verbatim.
     """
+    from pack_registry import pack_table   # lazy: this module must import without it (test_run_tests copies it alone)
     if not SKILLS_INDEX.is_file():
         return set()
     text = SKILLS_INDEX.read_text(encoding="utf-8")
-    entries = set(re.findall(r"\[\[skills/([^/\]|]+)/SKILL", text))
+    entries = set(re.findall(r"\[\[skills/([^/\]|]+)/SKILL", text)) | pack_table(text)[0]
 
-    in_library = in_packs = False
+    in_library = False
     for line in text.splitlines():
         if line.startswith("## "):
             in_library = "library" in line.lower()
-            in_packs = line.lower().startswith("## pack-provided")
             continue
-        if not (in_library or in_packs) or not line.startswith("|"):
+        if not in_library or not line.startswith("|"):
             continue
         cells = [c.strip() for c in line.strip().strip("|").split("|")]
         if len(cells) < 2 or set(cells[0]) <= set("-: "):
-            continue
-        if in_packs:
-            entries.update(re.findall(r"`([^`]+)`", cells[0]))
             continue
         family = cells[0].strip("*` ")
         if family.lower() in ("family", "skill"):        # header row
@@ -467,23 +468,34 @@ def check_index_resolves(findings: list[Finding]) -> dict[str, str]:
     """2. Every catalogued entry resolves to a skill on disk or one a registered pack provides.
 
     A mounted pack's skill resolves through the link `scripts/packs.sh sync` places in
-    skills/. Failing that, an entry an installable pack lists in `provides:` resolves from
-    the registry, however the pack is installed (a plugin leaves nothing on disk) — see
-    scripts/pack_registry.py. Returns those pack-provided entries, name -> pack.
+    skills/, and only so: a mounted pack that stopped shipping a catalogued skill is a
+    phantom. An entry whose pack is NOT mounted resolves from the registry when an
+    installable pack lists it in `provides:`, however the pack is installed (a plugin
+    leaves nothing on disk) — see scripts/pack_registry.py. A registry or a pack-provided
+    row the gate cannot read is a finding of its own. Returns the pack-provided entries.
     """
-    from pack_registry import provided_skills
+    from pack_registry import pack_table, provided_skills   # lazy, as in index_entries()
     on_disk = {d.name for d in skill_dirs()}
     if SKILLS_DIR.is_dir():
         on_disk |= {d.name for d in SKILLS_DIR.iterdir()
                     if d.is_symlink() and (d / SKILL_NAME).is_file()}
-    provided, pack_provided = provided_skills(PACKS_REGISTRY), {}
+    provided, problems = provided_skills(PACKS_REGISTRY)
+    findings.extend(Finding("pack-registry", "systems/packs.yaml", p) for p in problems)
+    if SKILLS_INDEX.is_file():
+        findings.extend(Finding("index-pack-table", "skills/_index.md", p)
+                        for p in pack_table(SKILLS_INDEX.read_text(encoding="utf-8"))[1])
+    pack_provided: dict[str, str] = {}
     for name in sorted(index_entries()):
-        if name not in on_disk and name in provided:
-            pack_provided[name] = provided[name]
-        elif name not in on_disk:
-            findings.append(Finding(
-                "index-phantom", "skills/_index.md",
-                f"entry {name!r} does not resolve — no skills/{name}/{SKILL_NAME}"))
+        pack = provided.get(name)
+        if name in on_disk:
+            continue
+        if pack and not (PACKS_DIR / pack).exists():
+            pack_provided[name] = pack
+            continue
+        mounted = f" (pack {pack!r} is mounted and does not ship it)" if pack else ""
+        findings.append(Finding(
+            "index-phantom", "skills/_index.md",
+            f"entry {name!r} does not resolve — no skills/{name}/{SKILL_NAME}{mounted}"))
     return pack_provided
 
 
@@ -671,7 +683,7 @@ def main() -> None:
                   "remote) — scope approximated by instance-template/root/")
     for name, pack in sorted(pack_provided.items()):
         print(f"  pack-provided: {name!r} — resolved from {PACKS_REGISTRY.relative_to(ROOT)} "
-              f"(pack {pack!r}), however that pack is installed")
+              f"(pack {pack!r}, not mounted here — a plugin, or not installed)")
     baseline = read_baseline()
     errors, warns = [], []
     for f in findings:

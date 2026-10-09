@@ -3,10 +3,11 @@
 `scripts/validate_framework.py`, with the registry read in `scripts/pack_registry.py`.
 
 A catalogued skill resolves in one of three ways: a real `skills/<name>/SKILL.md`, the link a
-mounted pack places in `skills/`, or an installable pack in `systems/packs.yaml` that lists it
-in `provides:` — the one way that also holds for a pack installed as a plugin, which leaves
-nothing on disk. Anything else is `index-phantom`. Each case builds a small throwaway tree and
-points the gate at it; one case reads the real catalog and registry.
+mounted pack places in `skills/`, or — only while its pack is not mounted — an installable pack
+in `systems/packs.yaml` that lists it in `provides:`, the one way that also holds for a pack
+installed as a plugin, which leaves nothing on disk. Anything else is `index-phantom`, and a
+registry or pack-provided row the gate cannot read is a finding of its own. Each case builds a
+small throwaway tree and points the gate at it; one case reads the real catalog and registry.
 
     python3 -m unittest discover -s tests
 """
@@ -48,8 +49,9 @@ class IndexResolvesTest(unittest.TestCase):
         self.own("core-skill")
         for name, value in (("SKILLS_DIR", self.skills),
                             ("SKILLS_INDEX", self.skills / "_index.md"),
-                            ("PACKS_REGISTRY", self.registry)):
-            patcher = mock.patch.object(vf, name, value, create=True)
+                            ("PACKS_REGISTRY", self.registry),
+                            ("PACKS_DIR", self.tmp / ".packs")):
+            patcher = mock.patch.object(vf, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
 
@@ -61,11 +63,11 @@ class IndexResolvesTest(unittest.TestCase):
         rows = "".join(f"| [[skills/{n}/SKILL\\|{n}]] | x |\n" for n in names)
         (self.skills / "_index.md").write_text(f"## Core\n\n| Skill | Use |\n|---|---|\n{rows}")
 
-    def phantoms(self) -> tuple[set[str], object]:
+    def phantoms(self, others: tuple[str, ...] = ()) -> tuple[set[str], object]:
         findings: list = []
         provided = vf.check_index_resolves(findings)
-        self.assertTrue(all(f.check == "index-phantom" for f in findings))
-        return {f.detail.split("'")[1] for f in findings}, provided
+        self.assertEqual([f.detail for f in findings if f.check != "index-phantom"], list(others))
+        return {f.detail.split("'")[1] for f in findings if f.check == "index-phantom"}, provided
 
     def test_a_registry_provided_entry_resolves_with_no_mount(self):
         self.catalog("core-skill", "alpha", "beta")
@@ -80,12 +82,29 @@ class IndexResolvesTest(unittest.TestCase):
         self.assertEqual(phantoms, {"ghost", "gamma"})
         self.assertEqual(provided, {"alpha": "agile"})
 
-    def test_a_missing_registry_provides_nothing(self):
+    def test_a_missing_registry_provides_nothing_and_is_reported(self):
         self.registry.unlink()
         self.catalog("core-skill", "alpha")
-        phantoms, provided = self.phantoms()
-        self.assertEqual(phantoms, {"alpha"})
-        self.assertEqual(provided, {})
+        findings: list = []
+        self.assertEqual(vf.check_index_resolves(findings), {})
+        self.assertEqual({(f.check, f.path) for f in findings},
+                         {("index-phantom", "skills/_index.md"), ("pack-registry", "systems/packs.yaml")})
+        self.assertIn("registry unreadable — FileNotFoundError", [f.detail for f in findings][0])
+
+    def test_an_unparseable_registry_is_reported_besides_the_phantoms(self):
+        self.registry.write_text("packs:\n  agile: [unclosed\n")
+        self.catalog("core-skill", "alpha")
+        findings: list = []
+        vf.check_index_resolves(findings)
+        self.assertEqual(sorted(f.check for f in findings), ["index-phantom", "pack-registry"])
+        self.assertIn("registry unreadable — ", next(f.detail for f in findings if f.check == "pack-registry"))
+
+    def test_provides_as_a_string_is_an_error_and_provides_nothing(self):
+        self.registry.write_text(REGISTRY + "  solo:\n    provides: delta\n    status: available\n")
+        self.catalog("core-skill", "alpha", "delta")
+        phantoms, provided = self.phantoms(("pack 'solo': `provides:` must be a list, not str",))
+        self.assertEqual(phantoms, {"delta"})
+        self.assertEqual(provided, {"alpha": "agile"})
 
     def test_a_mounted_pack_still_resolves_through_its_link(self):
         # a mounted pack: its skill folder linked into skills/, as `packs.sh sync` does;
@@ -100,6 +119,19 @@ class IndexResolvesTest(unittest.TestCase):
         self.assertEqual(phantoms, set())
         self.assertEqual(provided, {}, "a linked skill resolves on disk, not from the registry")
 
+    def test_a_mounted_pack_that_no_longer_ships_an_entry_is_phantom(self):
+        # `agile` is mounted and links alpha only; the registry still says it provides beta
+        mount = self.tmp / ".packs" / "agile" / "skills" / "alpha"
+        mount.mkdir(parents=True)
+        (mount / "SKILL.md").write_text("---\nname: alpha\n---\n")
+        (self.skills / "alpha").symlink_to(mount)
+        self.catalog("core-skill", "alpha", "beta")
+        findings: list = []
+        self.assertEqual(vf.check_index_resolves(findings), {})
+        self.assertEqual([f.detail for f in findings],
+                         ["entry 'beta' does not resolve — no skills/beta/SKILL.md "
+                          "(pack 'agile' is mounted and does not ship it)"])
+
     def test_the_pack_provided_table_is_catalogued(self):
         (self.skills / "_index.md").write_text(
             "## Core\n\n| Skill | Use |\n|---|---|\n"
@@ -113,6 +145,23 @@ class IndexResolvesTest(unittest.TestCase):
         phantoms, provided = self.phantoms()
         self.assertEqual(phantoms, {"ghost"})
         self.assertEqual(provided, {"alpha": "agile"})
+
+    def test_a_pack_table_the_gate_cannot_read_fails_closed(self):
+        (self.skills / "_index.md").write_text(
+            "## Core\n\n| Skill | Use |\n|---|---|\n"
+            "| [[skills/core-skill/SKILL\\|core-skill]] | x |\n\n"
+            "## Pack-provided skills\n\n| Skill | Pack | Plugin | Use for |\n|---|---|---|---|\n"
+            "| `alpha` | [agile](https://example.invalid/agile) | `p@m` | x |\n"
+            "| beta | [agile](https://example.invalid/agile) | `p@m` | x |\n"
+            "| `beta` `gamma` | [agile](https://example.invalid/agile) | `p@m` | x |\n\n"
+            "## Moved skills\n\n| Skill | Plugin |\n|---|---|\n"
+            "| `beta` | `p@m` |\n")
+        phantoms, provided = self.phantoms((
+            "pack-provided row 'beta' does not start with one backticked skill name",
+            "pack-provided row '`beta` `gamma`' does not start with one backticked skill name",
+            "pack row '`beta`' sits outside a `## Pack-provided` table"))
+        self.assertEqual((phantoms, provided), (set(), {"alpha": "agile"}))
+        self.assertEqual(vf.index_entries(), {"core-skill", "alpha"})
 
 
 class RealCatalogTest(unittest.TestCase):

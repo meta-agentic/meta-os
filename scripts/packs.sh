@@ -75,13 +75,26 @@ manifest_field() { # <name> <field> → that field of the pack's entry (repo, in
   awk -v p="$1" -v f="$2:" '
     $0 ~ "^  "p":" { inpack=1; next }
     inpack && /^  [a-zA-Z0-9_-]+:/ { inpack=0 }
-    inpack && /^    [a-z]/ && $1 == f { gsub(/"/,"",$2); print $2; exit }   # entry level, not config:
+    inpack && /^    [a-z]/ && $1 == f { gsub(/["\047]/,"",$2); print $2; exit }   # entry level, not config:
   ' "$MANIFEST"
 }
 # `install: plugin` — the pack is installed as a Claude Code plugin, not mounted: no .packs/
 # submodule and no links; `config` reads its pack.yaml where the plugin is installed.
-is_plugin() { [ "$(manifest_field "$1" install)" = plugin ]; }
+# `install: submodule` is the default; any other value is refused, never read as a mount.
+install_mode() { local m; m=$(manifest_field "$1" install); echo "${m:-submodule}"; }
+is_plugin() { [ "$(install_mode "$1")" = plugin ]; }
 plugin_id() { local id; id=$(manifest_field "$1" plugin); echo "${id:-$(registry_field "$1" plugin)}"; }
+plugin_drift() { # what check reports and apply refuses on, per install mode
+  local name m
+  for name in $(manifest_names); do
+    m=$(install_mode "$name")
+    if [ "$m" = plugin ]; then
+      [ -n "$(plugin_id "$name")" ] || echo "installed as a plugin but names none: $name (set plugin: <plugin>@<marketplace>)"
+      if [ -e ".packs/$name" ] || [ -n "$(git ls-files -s -- ".packs/$name" 2>/dev/null)" ]; then
+        echo "installed as a plugin and also mounted: $name — its skills are discovered twice (git rm .packs/$name)"; fi
+    elif [ "$m" != submodule ]; then echo "unknown install mode for $name: '$m' (plugin, or submodule — the default)"; fi
+  done
+}
 manifest_add() {
   [ -f "$MANIFEST" ] || printf '# Desired packs — reconciled by scripts/packs.sh apply\npacks:\n' > "$MANIFEST"
   grep -q "^  $1:" "$MANIFEST" && return 0
@@ -159,11 +172,12 @@ cmd_config() {
   local pack="${1:?usage: packs.sh config <pack> [key]}" key="${2:-}"
   valid_name "$pack"
   local schema=".packs/$pack/pack.yaml" keys mkeys id missing=""
+  case "$(install_mode "$pack")" in plugin|submodule) ;; *) die "$(plugin_drift | grep -F "for $pack:")" ;; esac
   if is_plugin "$pack"; then   # never fails for want of the plugin: the instance values still print
-    id=$(plugin_id "$pack")
-    schema=$([ -z "$id" ] || python3 "$(dirname "${BASH_SOURCE[0]}")/plugin_root.py" "$id" 2>/dev/null || true)
-    if [ -n "$schema" ]; then schema="$schema/pack.yaml"; else missing=1
-      echo "warn: plugin '${id:-?}' of pack '$pack' is not installed here — instance values only, no defaults or validation" >&2; fi
+    id=$(plugin_id "$pack"); schema="names no plugin"
+    if [ -n "$id" ]; then command -v python3 >/dev/null && schema=$(python3 "$(dirname "${BASH_SOURCE[0]}")/plugin_root.py" "$id" 2>&1) || schema="python3 not found"; fi
+    if [ -f "$schema/pack.yaml" ]; then schema="$schema/pack.yaml"; else missing=1
+      echo "warn: plugin '${id:-?}' of pack '$pack': ${schema:-not installed here} — instance values only, no defaults or validation" >&2; schema=""; fi
   else
     [ -L ".packs/$pack" ] && [ ! -e ".packs/$pack" ] && die "pack '$pack' is a dangling mount (.packs/$pack -> $(readlink ".packs/$pack")) — refusing"
     [ -d ".packs/$pack" ] || die "pack '$pack' is not mounted"
@@ -220,11 +234,9 @@ dangling_links() {
 }
 manifest_drift() { # mounts must match the manifest both ways
   local name p
+  plugin_drift
   for name in $(manifest_names); do
-    if is_plugin "$name"; then
-      [ -n "$(plugin_id "$name")" ] || echo "installed as a plugin but names none: $name (set plugin: <plugin>@<marketplace>)"
-      [ ! -e ".packs/$name" ] || echo "installed as a plugin and also mounted: $name — its skills are discovered twice (git rm .packs/$name)"
-    elif [ ! -d ".packs/$name" ]; then echo "declared but not mounted: $name (run scripts/packs.sh apply)"; fi
+    [ "$(install_mode "$name")" != submodule ] || [ -d ".packs/$name" ] || echo "declared but not mounted: $name (run scripts/packs.sh apply)"
   done
   for p in .packs/*; do
     [ -e "$p" ] || [ -L "$p" ] || continue
@@ -240,7 +252,7 @@ pin_drift() { # each initialised pack must sit, unmodified, at the commit its gi
   done
   for name in $(manifest_names); do
     p=".packs/$name"
-    [ -d "$p" ] && [ ! -L "$p" ] && [ -e "$p/.git" ] || continue
+    [ -d "$p" ] && [ ! -L "$p" ] && [ -e "$p/.git" ] && ! is_plugin "$name" || continue
     want=$(git ls-files -s -- "$p" | awk '$1 == "160000" { print $2 }')
     [ -n "$want" ] || continue
     have=$(git -C "$p" rev-parse HEAD 2>/dev/null || echo none)
@@ -257,7 +269,7 @@ union_plan() {
   local d p name t
   {
     for p in .packs/*/; do
-      [ -d "$p" ] || continue
+      [ -d "$p" ] && ! is_plugin "$(basename "$p")" || continue
       pack_skill_dirs "${p%/}" | while read -r d; do printf '%s\t../%s\n' "$(basename "$d")" "$d"; done
     done
   } | awk -F'\t' -v warn="${1:-}" '
@@ -345,7 +357,7 @@ sync_claude() {
   find .claude/agents -maxdepth 1 -type l -exec rm {} +
   find .claude/hooks -maxdepth 1 -type l -exec rm {} +
   for p in .packs/*/; do
-    [ -d "$p" ] || continue
+    [ -d "$p" ] && ! is_plugin "$(basename "$p")" || continue
     pname=$(basename "$p")
     if [ -d "${p}agents" ]; then
       for f in "${p}agents"/*.md; do
@@ -390,6 +402,7 @@ cmd_add() {
 cmd_remove() {
   local name="${1:?usage: packs.sh remove <name>}"
   valid_name "$name"
+  ! is_plugin "$name" || die "pack '$name' is installed as a plugin: uninstall it with /plugin uninstall $(plugin_id "$name"), then drop its entry from $MANIFEST (a leftover mount: git rm .packs/$name)"
   [ -d ".packs/$name" ] || die "pack '$name' is not mounted"
   if [ ! -L ".packs/$name" ] && [ -e ".packs/$name/.git" ] && [ -n "$(git -C ".packs/$name" status --porcelain 2>/dev/null)" ]; then
     die "pack '$name' has local changes that deinit -f would discard — refusing (git -C .packs/$name status)"
@@ -409,11 +422,12 @@ DEFER_SYNC=0   # apply sets it: one union rebuild at the end, not one per pack
 cmd_apply() {
   local name p failed=""
   DEFER_SYNC=1
+  refuse_found "$(plugin_drift)"   # a plugin pack is never mounted back, an unknown mode never guessed
   # A fresh clone or worktree carries the pins as empty dirs, and a pull or branch switch
   # can move a gitlink under an initialised mount: check both out at their recorded pin.
   for name in $(manifest_names); do
     p=".packs/$name"
-    if [ -d "$p" ] && [ ! -L "$p" ] && [ -z "$(ls -A "$p")" ]; then
+    if ! is_plugin "$name" && [ -d "$p" ] && [ ! -L "$p" ] && [ -z "$(ls -A "$p")" ]; then
       echo "apply: initialising '$name'"
       git submodule update --init -- "$p" || true
     fi
@@ -425,7 +439,7 @@ cmd_apply() {
   refuse_dangling dangling_packs
   refuse_dangling pin_drift
   for name in $(manifest_names); do
-    if [ ! -d ".packs/$name" ] && ! is_plugin "$name"; then
+    if [ ! -d ".packs/$name" ] && [ "$(install_mode "$name")" = submodule ]; then
       echo "apply: mounting '$name'"
       # Subshell so one pack's die doesn't stop the rest. set -e is off inside a
       # subshell under ||, so judge by the mount itself, not the exit status.
@@ -462,6 +476,7 @@ cmd_update() {
 
 cmd_list() {
   local p pname pin n
+  for pname in $(manifest_names); do is_plugin "$pname" && echo "$pname  plugin $(plugin_id "$pname")  (installed by Claude Code, not mounted)"; done
   for p in .packs/*/; do
     [ -d "$p" ] || { echo "no packs mounted"; return; }
     pname=$(basename "$p")

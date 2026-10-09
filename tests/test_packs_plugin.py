@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 GIT_ENV = {
     "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
     "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid",
+    "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "protocol.file.allow", "GIT_CONFIG_VALUE_0": "always",
     "GIT_CONFIG_NOSYSTEM": "1", "HOME": tempfile.gettempdir(),
 }
 
@@ -118,7 +119,7 @@ class PluginPackTest(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout.splitlines(), ["profile=full"])
         self.assertEqual(len(r.stderr.splitlines()), 1, r.stderr)
-        self.assertIn("'meta-alpha@market' of pack 'alpha' is not installed", r.stderr)
+        self.assertIn("plugin 'meta-alpha@market' of pack 'alpha': not installed here", r.stderr)
         self.assertEqual(self.packs("config", "alpha", "profile").stdout, "full\n")
         r = self.packs("config", "alpha", "engine")          # a default nobody can read: empty, not a failure
         self.assertEqual((r.returncode, r.stdout), (0, ""))
@@ -137,15 +138,46 @@ class PluginPackTest(unittest.TestCase):
         self.install(version="2.0.0", engine="mine", project=self.inst)
         self.assertEqual(self.packs("config", "alpha", "engine").stdout, "mine\n")
 
-    def test_claude_plugin_root_wins_only_when_it_is_this_plugin(self):
+    def test_claude_plugin_root_wins_only_when_it_is_this_plugin_from_this_marketplace(self):
         self.install(engine="cached")
-        own = self.cache(version="9.9.9", market="dev", engine="session")
+        own = self.cache(version="9.9.9", engine="session")
         other = self.cache(plugin="meta-beta", engine="beta")
+        namesake = self.cache(version="9.9.9", market="elsewhere", engine="namesake")
         self.manifest("    install: plugin\n")
-        self.assertEqual(self.packs("config", "alpha", "engine", env={"CLAUDE_PLUGIN_ROOT": str(own)}).stdout,
-                         "session\n")
-        self.assertEqual(self.packs("config", "alpha", "engine", env={"CLAUDE_PLUGIN_ROOT": str(other)}).stdout,
-                         "cached\n")
+        for root, want in ((own, "session"), (other, "cached"), (namesake, "cached")):
+            r = self.packs("config", "alpha", "engine", env={"CLAUDE_PLUGIN_ROOT": str(root)})
+            self.assertEqual(r.stdout, want + "\n", root)
+
+    def test_a_stale_or_malformed_install_record_warns_with_its_cause(self):
+        self.manifest("    install: plugin\n    config:\n      profile: full\n")
+        self.installed["meta-alpha@market"] = [{"scope": "user", "installPath": str(self.tmp / "gone" / "1.0.0")}]
+        self.write_installed()
+        r = self.packs("config", "alpha")
+        self.assertEqual((r.returncode, r.stdout), (0, "profile=full\n"))
+        self.assertIn(f"not found at its recorded installPath {self.tmp / 'gone' / '1.0.0'}", r.stderr)
+        for record, cause in (({"version": 2, "plugins": {"meta-alpha@market": [{"installPath": 5}]}},
+                               "malformed entry for it in installed_plugins.json"),
+                              ({"version": 2, "plugins": {"meta-alpha@market": [{"installPath": "/x", "projectPath": ""}]}},
+                               "malformed entry for it in installed_plugins.json"),
+                              ("not json", "unreadable installed_plugins.json (JSONDecodeError)"),
+                              ([1, 2], "unreadable installed_plugins.json (TypeError)")):
+            (self.config_dir / "plugins" / "installed_plugins.json").write_text(
+                record if isinstance(record, str) else json.dumps(record))
+            r = self.packs("config", "alpha")
+            self.assertEqual((r.returncode, r.stdout), (0, "profile=full\n"), r.stderr)
+            self.assertIn(cause, r.stderr)
+            self.assertEqual(len(r.stderr.splitlines()), 1, r.stderr)
+
+    def test_an_unknown_install_mode_is_refused_and_a_single_quoted_one_is_read(self):
+        self.manifest("    install: Plugin\n    config:\n      profile: full\n")
+        for cmd in ("check", "apply", "config"):
+            r = self.packs(cmd, *(["alpha"] if cmd == "config" else []))
+            self.assertNotEqual(r.returncode, 0, cmd)
+            self.assertIn("unknown install mode for alpha: 'Plugin'", r.stderr, cmd)
+        self.assertFalse((self.inst / ".packs").exists())
+        self.install()
+        self.manifest("    install: 'plugin'\n    config:\n      profile: full\n")
+        self.assertEqual(self.packs("config", "alpha").stdout, "profile=full\nengine=claude\n")
 
     def test_install_inside_the_config_block_is_a_config_value_not_the_install_mode(self):
         self.install()
@@ -167,6 +199,54 @@ class PluginPackTest(unittest.TestCase):
         self.assertFalse((self.inst / ".packs" / "alpha").exists())
         self.assertIn("0 pack links", self.packs("sync").stdout)
         self.assertEqual(self.links(), [])
+
+    def mounted_then_flipped(self) -> Path:
+        """A pack mounted as a submodule and committed, then declared `install: plugin`."""
+        src = self.tmp / "src" / "alpha"
+        (src / "skills" / "alpha-one").mkdir(parents=True)
+        (src / "skills" / "alpha-one" / "SKILL.md").write_text("---\nname: alpha-one\n---\n")
+        (src / "pack.yaml").write_text(PACK_YAML.format(v="0.1.0", engine="mounted"))
+        (src / "agents").mkdir()
+        (src / "agents" / "alpha-agent.md").write_text("# agent\n")
+        for args in (["init", "-q", "-b", "main"], ["add", "."], ["commit", "-q", "-m", "init"]):
+            subprocess.run(["git", *args], cwd=src, check=True, env={**os.environ, **GIT_ENV})
+        r = self.packs("add", "alpha", str(src))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("alpha-one", self.links())
+        subprocess.run(["git", "commit", "-q", "-am", "mount"], cwd=self.inst, check=True,
+                       env={**os.environ, **GIT_ENV})
+        self.manifest("    install: plugin\n    config:\n      profile: full\n")
+        return self.inst / ".packs" / "alpha"
+
+    def test_apply_never_mounts_a_plugin_pack_back_from_a_recorded_gitlink(self):
+        mount = self.mounted_then_flipped()
+        subprocess.run(["git", "submodule", "deinit", "-q", "-f", ".packs/alpha"], cwd=self.inst, check=True,
+                       env={**os.environ, **GIT_ENV})       # a fresh clone of this state: empty dir, gitlink kept
+        self.assertEqual(list(mount.iterdir()), [])
+        for cmd in ("apply", "check"):
+            r = self.packs(cmd)
+            self.assertNotEqual(r.returncode, 0, cmd)
+            self.assertIn("installed as a plugin and also mounted: alpha", r.stderr, cmd)
+            self.assertNotIn("state matches", r.stdout)
+        self.assertEqual(list(mount.iterdir()), [], "apply checked the plugin pack's mount out again")
+        shutil.rmtree(mount)                                 # the gitlink alone still counts
+        self.assertIn("also mounted: alpha", self.packs("check").stderr)
+
+    def test_sync_links_nothing_from_a_leftover_mount_of_a_plugin_pack(self):
+        self.mounted_then_flipped()
+        self.assertIn("0 pack links", self.packs("sync").stdout)
+        self.assertEqual(self.links(), [])
+        self.assertEqual(list((self.inst / ".claude" / "agents").iterdir()), [])
+        self.assertIn("also mounted: alpha", self.packs("check").stderr)
+
+    def test_list_shows_a_plugin_pack_and_remove_refuses_it(self):
+        self.manifest("    install: plugin\n    config:\n      profile: full\n")
+        self.assertEqual(self.packs("list").stdout,
+                         "alpha  plugin meta-alpha@market  (installed by Claude Code, not mounted)\nno packs mounted\n")
+        r = self.packs("remove", "alpha")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("installed as a plugin: uninstall it with /plugin uninstall meta-alpha@market", r.stderr)
+        self.assertIn("profile: full", (self.inst / ".packs.yaml").read_text())
 
     def test_check_reports_a_plugin_pack_that_is_also_mounted_or_names_no_plugin(self):
         (self.inst / ".packs" / "alpha").mkdir(parents=True)

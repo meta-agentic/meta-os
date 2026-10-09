@@ -495,10 +495,10 @@ def check_index_resolves(findings: list[Finding]) -> dict[str, str]:
         if pack and pack not in mounted:
             pack_provided[name] = pack
             continue
-        mounted = f" (pack {pack!r} is mounted and does not ship it)" if pack else ""
+        note = f" (pack {pack!r} is mounted and does not ship it)" if pack else ""
         findings.append(Finding(
             "index-phantom", "skills/_index.md",
-            f"entry {name!r} does not resolve — no skills/{name}/{SKILL_NAME}{mounted}"))
+            f"entry {name!r} does not resolve — no skills/{name}/{SKILL_NAME}{note}"))
     return pack_provided
 
 

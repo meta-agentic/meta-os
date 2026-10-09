@@ -98,4 +98,4 @@ present**. The migration is simply: move `vars` / `backlogs` / `memory` out of
 `instance.config.json` into `meta-os.config.json`, and leave the deployment keys behind.
 
 See [[systems/memory-layer]] for the topology semantics and [[systems/distribution]] for how
-an instance and the framework share one repository.
+an instance holds the framework's paths in its own repository.

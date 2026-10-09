@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # In-place framework upgrade for a bootstrapped meta-os instance.
 #
-# The framework and the instance share one repository but own disjoint paths
-# (systems/distribution.md), so taking a new framework version is a merge that cannot
+# An instance's tree holds the framework's paths beside its own, and the two own disjoint
+# paths (systems/distribution.md), so taking a new framework version is a merge that cannot
 # collide with your files — provided you never edited a framework path. This script
 # checks exactly that first, then merges the framework's main from the `upstream`
 # remote, rebuilds the pack links, and reports what instance-template/ changed since this

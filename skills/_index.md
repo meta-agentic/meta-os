@@ -14,8 +14,6 @@ whole library — never create a second real copy; discovery is via symlinks.
 
 | Skill | Domain | Use for |
 |-------|--------|---------|
-| [[skills/agile-process/SKILL\|agile-process]] | Process | **→ moved to the [agile pack](https://github.com/meta-agentic/meta-discipline-agile)** — mount with `scripts/packs.sh add agile`; link resolves in instances with the pack mounted |
-| [[skills/agile-swarm/SKILL\|agile-swarm]] | Process | **→ moved to the [agile pack](https://github.com/meta-agentic/meta-discipline-agile)** — same mount; deprecation rows kept for one minor version |
 | [[skills/graphify/SKILL\|graphify]] | Memory | Turn any folder (code/docs/papers/media) into a navigable knowledge graph |
 | [[skills/infoviz/SKILL\|infoviz]] | Interface | Choose the visual *form* for data before drawing it — encoding, complex-data method, trust gate |
 | [[skills/skill-builder/SKILL\|skill-builder]] | Meta | Author one skill: the trigger contract, progressive disclosure, and the registration a skill is not finished without |
@@ -25,6 +23,15 @@ whole library — never create a second real copy; discovery is via symlinks.
 | `swarm-orchestration` | Orchestration | **→ removed, third-party.** Coordination inside a session belongs to the host engine ([[systems/engine]]); the OS's own parallel model is [[systems/swarm-harness]], driven by the [agile pack](https://github.com/meta-agentic/meta-discipline-agile)'s `agile-swarm` |
 | [[skills/multi-engine/SKILL\|multi-engine]] | Meta | Cross-provider headless fan-out via meta-cli (`claude`/`gemini`/`grok`/…); collect → `memory/raw/` — see [[systems/engine]] |
 | [[skills/infoviz/SKILL\|infoviz]] | Data | Choose the RIGHT visual form before drawing it — chart/encoding selection from data + task, and method choice for complex data (network, hierarchy, flow, temporal, geospatial); hands off to styling |
+
+## Pack-provided skills
+
+Skills a pack ships rather than this folder, catalogued here because the core shipped them until they moved (each row kept for one minor version after the move). A pack skill has no `skills/<name>/` folder in the framework, so these rows link the pack, not a `SKILL.md`. Each resolves from the `provides:` list of its pack in [[systems/packs.yaml|the registry]], whichever way the pack is installed — a submodule mount or the plugin marketplace; see [[systems/packs]].
+
+| Skill | Pack | Plugin | Use for |
+|-------|------|--------|---------|
+| `agile-process` | [agile](https://github.com/meta-agentic/meta-discipline-agile) | `meta-discipline-agile@meta-agentic` | Backlog of record, ceremonies, transitions — transition ledger |
+| `agile-swarm` | [agile](https://github.com/meta-agentic/meta-discipline-agile) | `meta-discipline-agile@meta-agentic` | Multi-lane sprint execution — lane ledger |
 
 ## What is deliberately not here
 

@@ -7,5 +7,3 @@
 #     python3 scripts/validate_framework.py --update-baseline
 # Format: <check>\t<path>\t<detail>
 # public-safety findings are never recorded here — see BASELINEABLE.
-index-phantom	skills/_index.md	entry 'agile-process' does not resolve — no skills/agile-process/SKILL.md
-index-phantom	skills/_index.md	entry 'agile-swarm' does not resolve — no skills/agile-swarm/SKILL.md

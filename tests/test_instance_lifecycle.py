@@ -262,6 +262,9 @@ class LifecycleTest(unittest.TestCase):
         git(inst, "add", "-A"); git(inst, "commit", "-q", "-m", "a capture")
         r = run(["python3", "scripts/validate_framework.py"], inst, check=False)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        # no pack mounted: the catalogued pack skills resolve from the registry, not as debt
+        self.assertNotIn("index-phantom", r.stdout)
+        self.assertIn("pack-provided: 'agile-process'", r.stdout)
 
     def test_the_framework_gate_refuses_a_tracked_instance_path_in_the_framework(self):
         fw = self.tmp / "fw"

@@ -68,6 +68,7 @@ SKILLS_INDEX = SKILLS_DIR / "_index.md"
 PROVENANCE = ROOT / "PROVENANCE.md"
 SYSTEMS_DIR = ROOT / "systems"
 ONTOLOGY = SYSTEMS_DIR / "ontology.yaml"
+PACKS_REGISTRY = SYSTEMS_DIR / "packs.yaml"
 BASELINE = ROOT / "scripts" / "framework-baseline.txt"
 
 INDEX_NAME = "_index.md"
@@ -330,10 +331,12 @@ def provenance_skills() -> set[str]:
 
 
 def index_entries() -> set[str]:
-    """Every skill name catalogued in skills/_index.md, from both its tables.
+    """Every skill name catalogued in skills/_index.md, from all its tables.
 
-    Two shapes are catalogued there and both count as an entry:
+    Three shapes are catalogued there and all count as an entry:
       * core table  — a `[[skills/<name>/SKILL|…]]` wikilink;
+      * pack-provided table — the backticked name in the first cell of a row under a
+        `## Pack-provided …` heading (a pack skill has no folder here to link to);
       * library table — a family row. A family cell ending in `-` (after the
         bold markers are stripped, e.g. `**agentdb-***`) is a PREFIX expanded
         over the `·`-separated members in the second cell; anything else (e.g.
@@ -344,15 +347,19 @@ def index_entries() -> set[str]:
     text = SKILLS_INDEX.read_text(encoding="utf-8")
     entries = set(re.findall(r"\[\[skills/([^/\]|]+)/SKILL", text))
 
-    in_library = False
+    in_library = in_packs = False
     for line in text.splitlines():
         if line.startswith("## "):
             in_library = "library" in line.lower()
+            in_packs = line.lower().startswith("## pack-provided")
             continue
-        if not in_library or not line.startswith("|"):
+        if not (in_library or in_packs) or not line.startswith("|"):
             continue
         cells = [c.strip() for c in line.strip().strip("|").split("|")]
         if len(cells) < 2 or set(cells[0]) <= set("-: "):
+            continue
+        if in_packs:
+            entries.update(re.findall(r"`([^`]+)`", cells[0]))
             continue
         family = cells[0].strip("*` ")
         if family.lower() in ("family", "skill"):        # header row
@@ -456,21 +463,28 @@ def check_skill_registration(findings: list[Finding]) -> None:
                 f"skill {d.name!r} exists on disk but is absent from the catalog"))
 
 
-def check_index_resolves(findings: list[Finding]) -> None:
-    """2. Every catalogued entry resolves to a skill that exists on disk.
+def check_index_resolves(findings: list[Finding]) -> dict[str, str]:
+    """2. Every catalogued entry resolves to a skill on disk or one a registered pack provides.
 
-    A pack skill the catalog lists resolves when its pack is mounted: the link
-    `scripts/packs.sh sync` places in skills/ leads to a real SKILL.md.
+    A mounted pack's skill resolves through the link `scripts/packs.sh sync` places in
+    skills/. Failing that, an entry an installable pack lists in `provides:` resolves from
+    the registry, however the pack is installed (a plugin leaves nothing on disk) — see
+    scripts/pack_registry.py. Returns those pack-provided entries, name -> pack.
     """
+    from pack_registry import provided_skills
     on_disk = {d.name for d in skill_dirs()}
     if SKILLS_DIR.is_dir():
         on_disk |= {d.name for d in SKILLS_DIR.iterdir()
                     if d.is_symlink() and (d / SKILL_NAME).is_file()}
+    provided, pack_provided = provided_skills(PACKS_REGISTRY), {}
     for name in sorted(index_entries()):
-        if name not in on_disk:
+        if name not in on_disk and name in provided:
+            pack_provided[name] = provided[name]
+        elif name not in on_disk:
             findings.append(Finding(
                 "index-phantom", "skills/_index.md",
                 f"entry {name!r} does not resolve — no skills/{name}/{SKILL_NAME}"))
+    return pack_provided
 
 
 def check_systems_front_matter(findings: list[Finding], note_types: set[str]) -> None:
@@ -633,7 +647,7 @@ def main() -> None:
     note_types = ontology_note_types()
     findings: list[Finding] = []
     check_skill_registration(findings)
-    check_index_resolves(findings)
+    pack_provided = check_index_resolves(findings)
     check_systems_front_matter(findings, note_types)
     check_folder_index(findings)
     check_public_safety(findings)
@@ -655,6 +669,9 @@ def main() -> None:
             print(f"  instance: checking the framework's paths at {scope[0]}" if scope else
                   "  instance: no framework ref (set META_OS_FRAMEWORK_REF or add the `upstream` "
                   "remote) — scope approximated by instance-template/root/")
+    for name, pack in sorted(pack_provided.items()):
+        print(f"  pack-provided: {name!r} — resolved from {PACKS_REGISTRY.relative_to(ROOT)} "
+              f"(pack {pack!r}), however that pack is installed")
     baseline = read_baseline()
     errors, warns = [], []
     for f in findings:

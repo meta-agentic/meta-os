@@ -252,7 +252,8 @@ BASELINEABLE = {
     "skill-index": True,
     "index-phantom": True,
     "index-pack-table": True,
-    "pack-registry": True,
+    # An unreadable registry is not debt anyone should accept: it switches the check off.
+    "pack-registry": False,
     "systems-front-matter": True,
     "folder-index": True,
     "count-assertion": True,
@@ -467,14 +468,15 @@ def check_skill_registration(findings: list[Finding]) -> None:
 def check_index_resolves(findings: list[Finding]) -> dict[str, str]:
     """2. Every catalogued entry resolves to a skill on disk or one a registered pack provides.
 
-    A mounted pack's skill resolves through the link `scripts/packs.sh sync` places in
-    skills/, and only so: a mounted pack that stopped shipping a catalogued skill is a
-    phantom. An entry whose pack is NOT mounted resolves from the registry when an
-    installable pack lists it in `provides:`, however the pack is installed (a plugin
-    leaves nothing on disk) — see scripts/pack_registry.py. A registry or a pack-provided
-    row the gate cannot read is a finding of its own. Returns the pack-provided entries.
+    A mounted pack's skill resolves from the pack's own tree (whether or not `packs.sh
+    sync` linked it), and a mounted pack that stopped shipping a catalogued skill is a
+    phantom. An entry whose pack is NOT mounted — never added, installed as a plugin, or an
+    uninitialised (empty) submodule as in CI — resolves from the registry when an
+    installable pack lists it in `provides:`; see scripts/pack_registry.py. A registry or a
+    pack-provided row the gate cannot read is a finding of its own. Returns the
+    pack-provided entries.
     """
-    from pack_registry import pack_table, provided_skills   # lazy, as in index_entries()
+    from pack_registry import mounted_packs, pack_table, provided_skills   # lazy, as in index_entries()
     on_disk = {d.name for d in skill_dirs()}
     if SKILLS_DIR.is_dir():
         on_disk |= {d.name for d in SKILLS_DIR.iterdir()
@@ -484,12 +486,13 @@ def check_index_resolves(findings: list[Finding]) -> dict[str, str]:
     if SKILLS_INDEX.is_file():
         findings.extend(Finding("index-pack-table", "skills/_index.md", p)
                         for p in pack_table(SKILLS_INDEX.read_text(encoding="utf-8"))[1])
-    pack_provided: dict[str, str] = {}
+    mounted, pack_provided = mounted_packs(PACKS_DIR), {}
+    on_disk |= set().union(*mounted.values())
     for name in sorted(index_entries()):
         pack = provided.get(name)
         if name in on_disk:
             continue
-        if pack and not (PACKS_DIR / pack).exists():
+        if pack and pack not in mounted:
             pack_provided[name] = pack
             continue
         mounted = f" (pack {pack!r} is mounted and does not ship it)" if pack else ""
@@ -683,7 +686,7 @@ def main() -> None:
                   "remote) — scope approximated by instance-template/root/")
     for name, pack in sorted(pack_provided.items()):
         print(f"  pack-provided: {name!r} — resolved from {PACKS_REGISTRY.relative_to(ROOT)} "
-              f"(pack {pack!r}, not mounted here — a plugin, or not installed)")
+              f"(pack {pack!r}, not mounted here)")
     baseline = read_baseline()
     errors, warns = [], []
     for f in findings:

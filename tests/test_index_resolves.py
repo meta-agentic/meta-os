@@ -89,7 +89,9 @@ class IndexResolvesTest(unittest.TestCase):
         self.assertEqual(vf.check_index_resolves(findings), {})
         self.assertEqual({(f.check, f.path) for f in findings},
                          {("index-phantom", "skills/_index.md"), ("pack-registry", "systems/packs.yaml")})
-        self.assertIn("registry unreadable — FileNotFoundError", [f.detail for f in findings][0])
+        detail = [f.detail for f in findings][0]
+        self.assertEqual(detail, "registry unreadable — No such file or directory")
+        self.assertFalse(vf.BASELINEABLE["pack-registry"], "an unreadable registry is never accepted debt")
 
     def test_an_unparseable_registry_is_reported_besides_the_phantoms(self):
         self.registry.write_text("packs:\n  agile: [unclosed\n")
@@ -97,7 +99,9 @@ class IndexResolvesTest(unittest.TestCase):
         findings: list = []
         vf.check_index_resolves(findings)
         self.assertEqual(sorted(f.check for f in findings), ["index-phantom", "pack-registry"])
-        self.assertIn("registry unreadable — ", next(f.detail for f in findings if f.check == "pack-registry"))
+        detail = next(f.detail for f in findings if f.check == "pack-registry")
+        self.assertTrue(detail.startswith("registry unparseable — ") and detail.endswith(" at line 3"), detail)
+        self.assertNotIn(str(self.tmp), detail, "a finding may reach a tracked file: no local path")
 
     def test_provides_as_a_string_is_an_error_and_provides_nothing(self):
         self.registry.write_text(REGISTRY + "  solo:\n    provides: delta\n    status: available\n")
@@ -118,6 +122,29 @@ class IndexResolvesTest(unittest.TestCase):
         phantoms, provided = self.phantoms()
         self.assertEqual(phantoms, set())
         self.assertEqual(provided, {}, "a linked skill resolves on disk, not from the registry")
+
+    def test_an_uninitialised_submodule_is_not_a_mount(self):
+        # what a CI checkout without `submodules:` holds: an empty .packs/<pack>/, no links
+        (self.tmp / ".packs" / "agile").mkdir(parents=True)
+        self.catalog("core-skill", "alpha", "beta")
+        phantoms, provided = self.phantoms()
+        self.assertEqual((phantoms, provided), (set(), {"alpha": "agile", "beta": "agile"}))
+
+    def test_a_mounted_pack_resolves_from_its_own_tree_before_sync(self):
+        # initialised but `packs.sh sync` never ran: no links in skills/
+        pack = self.tmp / ".packs" / "agile"
+        for rel in ("skills/alpha", "skills/nested/beta", "skills/gamma"):
+            (pack / rel).mkdir(parents=True)
+            (pack / rel / "SKILL.md").write_text("---\nname: x\n---\n")
+        (pack / ".git").write_text("gitdir: elsewhere\n")
+        self.catalog("core-skill", "alpha", "beta")
+        phantoms, provided = self.phantoms()
+        self.assertEqual((phantoms, provided), (set(), {}))
+        # a plugin.json with skill paths is authoritative, as for packs.sh: beta is not listed
+        (pack / ".claude-plugin").mkdir()
+        (pack / ".claude-plugin" / "plugin.json").write_text('{"name": "agile", "skills": ["./skills/alpha"]}')
+        phantoms, provided = self.phantoms()
+        self.assertEqual((phantoms, provided), ({"beta"}, {}))
 
     def test_a_mounted_pack_that_no_longer_ships_an_entry_is_phantom(self):
         # `agile` is mounted and links alpha only; the registry still says it provides beta
@@ -145,6 +172,31 @@ class IndexResolvesTest(unittest.TestCase):
         phantoms, provided = self.phantoms()
         self.assertEqual(phantoms, {"ghost"})
         self.assertEqual(provided, {"alpha": "agile"})
+
+    def test_rows_the_pack_table_would_skip_are_findings(self):
+        (self.skills / "_index.md").write_text(
+            "## Pack-provided skills\n\nSee [[systems/packs.yaml|the registry]] and [[systems/packs]].\n\n"
+            "| Skill | Pack | Plugin | Use for |\n|---|---|---|---|\n"
+            "| `alpha` | [agile](https://example.invalid/agile) | `p@m` | x |\n"
+            "| | [agile](https://example.invalid/agile) | `p@m` | x |\n"
+            "  | `beta` | [agile](https://example.invalid/agile) | `p@m` | x |\n"
+            "`gamma` | agile | `p@m` | x\n")
+        phantoms, provided = self.phantoms((
+            "pack-provided row '' does not start with one backticked skill name",
+            "pack-provided row '| `beta` | [agile](https://example.invalid/agile) | `p@m` | x |' "
+            "is not a table row (indented, or no leading pipe)",
+            "pack-provided row '`gamma` | agile | `p@m` | x' is not a table row (indented, or no leading pipe)"))
+        self.assertEqual((phantoms, provided), (set(), {"alpha": "agile"}))
+
+    def test_an_at_sign_outside_a_plugin_column_is_not_a_pack_row(self):
+        (self.skills / "_index.md").write_text(
+            "## Core\n\n| Skill | Use |\n|---|---|\n"
+            "| [[skills/core-skill/SKILL\\|core-skill]] | pinned at `pkg@1.2.3` |\n"
+            "| `a@b` | an address |\n\n"
+            "## Library\n\n| Family | Members | Plugin |\n|---|---|---|\n"
+            "| **misc** | core-skill | `p@m` |\n")
+        phantoms, provided = self.phantoms(("pack row '**misc**' sits outside a `## Pack-provided` table",))
+        self.assertEqual((phantoms, provided), (set(), {}))
 
     def test_a_pack_table_the_gate_cannot_read_fails_closed(self):
         (self.skills / "_index.md").write_text(

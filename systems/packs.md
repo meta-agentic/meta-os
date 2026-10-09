@@ -126,6 +126,19 @@ conversation at all: write the manifest (e.g. from a feature flag like
 `METAOS_PACKS=agile,superpowers` on first run) and run `apply`. The selection lives in
 the vault, so it survives image upgrades and re-applies on every boot.
 
+**A pack installed as a plugin.** An instance that gets a pack as a Claude Code plugin rather than as a mount declares it in `.packs.yaml` with `install: plugin`, and keeps its `config:` block where it was:
+
+```yaml
+packs:
+  agile:
+    install: plugin                               # no submodule, no links
+    plugin: meta-discipline-agile@meta-agentic    # optional — the registry's `plugin:` is the default
+    config:
+      profile: scrum
+```
+
+For such an entry `check` expects no mount, and reports one that is present anyway (its skills would be discovered twice) or an entry that names no plugin; `sync` and `apply` place nothing; `config` resolves the instance's values against the `pack.yaml` of the installed plugin, exactly as for a mount. The plugin is found by `scripts/plugin_root.py`: `$CLAUDE_PLUGIN_ROOT` when it is that plugin, otherwise the `installPath` that `plugins/installed_plugins.json` in the Claude Code config directory (`$CLAUDE_CONFIG_DIR`, default `~/.claude`) records for it, a project-scoped install winning over a user one inside its own project. Where the plugin is not installed, `config` still prints the instance's own values and warns once that defaults and validation are unavailable; it never fails for that, so a skill reading its config keeps working. The plugin's version is whatever Claude Code installed: no pin enters the instance's history.
+
 ## Parameterisation — method vs. opinion
 
 A pack that hardcodes its author's conventions just relocates opinion; the contract is

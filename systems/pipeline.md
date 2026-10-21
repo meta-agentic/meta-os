@@ -404,22 +404,7 @@ is text and the history is the audit trail.
 
 ## 11 · Configuration
 
-Instance-level. The prototype loop (`pipeline/tick.py`) reads a YAML file named on its command
-line today; the intended home is the estate-config namespace `meta-os.swarm`
-([[systems/config]]), which is **not in the schema yet**. The architecture decision fixes the
-final key set (it adds at least the reserves, the record repository and the executable
-spaces); the model's keys and defaults are:
-
-| Key | Meaning | Default |
-|---|---|---|
-| `lanes` | `m_max`, the lane slots | 5 from the sizing (§2); 3 for a proof of concept |
-| `tokens` | `N`, the CONWIP cap | `2 × lanes` |
-| `fairness_share` | the largest share of the tokens one space may hold | 0.5 |
-| `automerge_classes` | change classes that skip the PO | `[]` |
-| `review_sla_days` | the review-age limit that stops new work for a space | 5 |
-| `review_queue_cap` | the most items one space may hold in review before it takes no new work (§5.1 rule 7) | 4 for a proof of concept |
-| `lane_budget` | a run's cap before it is reaped: its expected cost × 3 | 3 |
-| `tick` | the tick interval | 10 min; hourly is too slow to re-plan |
+Instance-level, in two places. The numbers and identities live in the estate config's `meta-os.swarm` namespace ([[systems/config]], validated by the config schema): the lane slots, the token cap, the fairness share, the review limits, a run's budget multiple, the retry cap, the tick interval, the window reserves, the mileage span, the watchdog's thresholds, the executable spaces, the record repository, the planner port and the dashboard's control switch. The loop reads them and never writes them (§4). The pipeline's own configuration file, which `pipeline/tick.py` takes on its command line, keeps what is text rather than a bound: the lane prompt, the public-repository note, and how each space's items route to repositories. [[systems/config]] lists every key with its default.
 
 ## 12 · Failure modes this design closes
 

@@ -43,7 +43,8 @@ optional; the file may be omitted entirely (defaults apply). Shape:
       { "label": "estate",   "path": "…/vault",  "layout": "project/tier" }
     ],
     "federated": [ { "label": "docs-repo", "path": "…" } ]  // navigation only, never canon
-  }
+  },
+  "swarm": { "lanes": 3, "record_repository": { "url": "…", "path": "…" } }  // the autonomous pipeline
 }
 ```
 
@@ -60,6 +61,35 @@ optional; the file may be omitted entirely (defaults apply). Shape:
   (each with a `layout`), `federated` mounts are **navigation** context. Omit the block and
   memory falls back to the instance's own `memory/{raw,wiki,output}` as the sole canon root
   plus `vaults/*` as federated mounts — byte-for-byte the prior behaviour.
+
+- **`swarm`** — the autonomous pipeline's bounds, cadence and identities ([[systems/pipeline]]). The loop reads them and never writes them; the pipeline's own configuration file keeps the lane prompt and the routing of items to repositories. Every key is optional:
+
+| Key | Meaning | Default |
+|---|---|---|
+| `lanes` | `m_max`, the lane slots | 5 (the sizing); 3 for a proof of concept |
+| `min_lanes` | `m_min`, the fewest working lanes the regulator keeps while the pipe runs | 1 |
+| `tokens` | `N`, the CONWIP cap, set by a human from the sizing | `2 × lanes` |
+| `fairness_share` | the largest share of the tokens one space may hold | 0.5 |
+| `automerge_classes` | change classes that merge without the human station | `[]` |
+| `review_sla_days` | a space whose oldest item in review is older takes no new work | 5 |
+| `review_queue_cap` | the most items one space may hold in review before it takes no new work | 4 |
+| `lane_budget` | a run's cap as a multiple of its expected cost | 3 |
+| `max_retries` | give-backs before an item is no longer admissible | 2 |
+| `tick_minutes` | the tick interval; an early tick follows a run's end or a control | 10 |
+| `reserves.five_hour`, `reserves.week` | the share of each window's allowance never spent | 0.15, 0.10 |
+| `mileage_ticks` | the span of the per-window mileage average | 6 |
+| `stale_after_ticks` | ticks without any session activity before a lane is reaped | 2 |
+| `max_stale_reaps` | reaps of one item before it is held for a human | 2 |
+| `stall_after_ticks` | idle ticks with admissible work before a stall is reported | 3 |
+| `executable_spaces` | the spaces whose items the pipeline may start | `[]` (none) |
+| `record_repository.url`, `.path` | the private repository the loop writes, and its local clone | none |
+| `planner.adapter` | `command` or `reasoning` | `reasoning` |
+| `planner.command` | the planner command and its arguments | none |
+| `planner.repair_max_items`, `.churn_cap` | repair when a change touches at most this many items or one lane; solve cold past this edit distance | 5, 10 |
+| `planner.cold_every_hours` | hours between scheduled cold solves (one also runs at window start) | 6 |
+| `planner.repair_timeout_seconds`, `.cold_timeout_seconds` | time allowed before the tick plans by reasoning | 30, 90 |
+| `dashboard_controls` | the Pipeline tab's controls on a local-source dashboard; never on a hosted one | `false` |
+| `visibility_probe` | probe each run's repository through `scripts/public_repo_gate.py` | `false` |
 
 ## Defaults & degradation
 

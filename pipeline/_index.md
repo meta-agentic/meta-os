@@ -9,7 +9,9 @@ autonomy (regulator, reflection, speculation) [[systems/pipeline/control-spike]]
 
 This folder is **mechanism, not policy** — instances mount it rather than copy it, so it
 must run unchanged in every one of them: it holds no repository names, no budgets, no
-prompts. An instance supplies a config file and a state directory; a harness in the
+prompts. An instance supplies a config file and a state directory (with `visibility_probe: true`
+there, each run's repository is probed through [[scripts/_index|scripts/public_repo_gate.py]]
+and a repository not proven private gets a branch name without the item id); a harness in the
 instance executes what `tick.py plan` emits and feeds the outcome back through
 `tick.py record`.
 

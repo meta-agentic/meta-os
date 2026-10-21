@@ -10,7 +10,9 @@ request. Every repository counts as public until the probe proves it private.
     public_repo_gate.py setup [-C CLONE]                 lane setup: probe; if public, install the
                                                          commit-msg hook and check the branch name
     public_repo_gate.py commit-msg FILE [-C CLONE]       the hook: reject a message carrying a key
-    public_repo_gate.py pre-pr [-C CLONE] [--base REF]   before a PR: branch, messages, added lines
+    public_repo_gate.py pre-pr [-C CLONE] [--base REF] [--title T] [--body-file F]
+                                                         before a PR: branch, messages, file names,
+                                                         added lines, and the PR's title and body
 
 Configuration is the instance's: the `publicRepoGate` object of meta-os.config.json (from
 --config, else the repository this script sits in). Every key is optional:
@@ -20,7 +22,16 @@ Configuration is the instance's: the `publicRepoGate` object of meta-os.config.j
     exemptRepos    OWNER/NAME whose public text carries keys by design; paths are still checked
     pathPrefixes   absolute path prefixes that are instance data, besides any /Users/<name>
 
-Exit: 0 clean or not public, 1 a finding, 2 a usage or configuration error.
+An unknown key or a wrong type is an error, never a silent fallback to the defaults.
+
+The hook is not the whole gate. `git commit --no-verify`, and every operation that never runs
+`commit-msg` (cherry-pick, rebase, am, commit-tree), write commits it never sees; `pre-pr` is
+the backstop that reads every commit on the branch. `setup` exiting 2 means no hook could be
+installed (a foreign hook, or a clone that sets core.hooksPath): the lane stops, or calls
+`commit-msg "$1"` from the repository's own hook. The installed hook names this script by its
+absolute path, so removing that checkout breaks every later commit, closed.
+
+Exit: 0 clean or not public, 1 a finding, 2 a usage, configuration or git error.
 """
 from __future__ import annotations
 
@@ -44,12 +55,26 @@ HOOK_MARK = "# meta-os public-repo gate"
 GITHUB_RE = re.compile(r"github\.com[:/]+([^/\s]+)/([^/\s]+?)(?:\.git)?/?$")
 
 
+SCHEMA = {"keyPattern": str, "allowedTokens": list, "exemptRepos": list, "pathPrefixes": list}
+
+
+class GateError(Exception):
+    """A configuration or git failure: exit 2, never a pass."""
+
+
 class Config:
     def __init__(self, data: dict):
+        for key, value in data.items():
+            if key not in SCHEMA:
+                raise GateError(f"publicRepoGate: unknown key {key!r} (known: {', '.join(SCHEMA)})")
+            if not isinstance(value, SCHEMA[key]) or (
+                    isinstance(value, list) and not all(isinstance(v, str) for v in value)):
+                raise GateError(f"publicRepoGate: {key} must be "
+                                f"{'a string' if SCHEMA[key] is str else 'a list of strings'}")
         try:
             self.key_re = re.compile(data["keyPattern"]) if data.get("keyPattern") else TRACKER_KEY_RE
         except re.error as exc:
-            raise SystemExit(f"public-repo gate: keyPattern is not a valid regex: {exc}") from None
+            raise GateError(f"publicRepoGate: keyPattern is not a valid regex: {exc}") from None
         self.allowed = PUBLIC_SAFETY_ALLOWED_TOKENS | set(data.get("allowedTokens") or ())
         self.exempt = {r.lower() for r in data.get("exemptRepos") or ()}
         prefixes = [re.escape(p) for p in data.get("pathPrefixes") or ()]
@@ -60,20 +85,54 @@ def load_config(path: str | None) -> Config:
     p = Path(path) if path else ROOT / "meta-os.config.json"
     if not p.is_file():
         if path:
-            raise SystemExit(f"public-repo gate: no config at {p}")
+            raise GateError(f"no config at {p}")
         return Config({})
     try:
         data = json.loads(p.read_text(encoding="utf-8")).get("publicRepoGate") or {}
     except (OSError, ValueError, AttributeError) as exc:
-        raise SystemExit(f"public-repo gate: unreadable config {p}: {exc}") from None
+        raise GateError(f"unreadable config {p}: {exc}") from None
     if not isinstance(data, dict):
-        raise SystemExit(f"public-repo gate: publicRepoGate in {p} is not an object")
+        raise GateError(f"publicRepoGate in {p} is not an object")
     return Config(data)
 
 
 def git(clone: str, *args: str) -> str:
+    """Best effort: '' on failure. Only for reads whose absence fails closed on its own."""
     r = subprocess.run(["git", "-C", clone, *args], capture_output=True, text=True)
     return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def git_strict(clone: str, *args: str) -> str:
+    r = subprocess.run(["git", "-C", clone, *args], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise GateError(f"git {' '.join(args)} failed: {r.stderr.strip() or r.returncode}")
+    return r.stdout
+
+
+def added_lines(diff: str) -> list[str]:
+    """Added lines of a diff, read by hunk, so a content line starting '++' is never a header."""
+    out, in_hunk = [], False
+    for line in diff.splitlines():
+        if line.startswith("diff --git "):
+            in_hunk = False
+        elif line.startswith("@@"):
+            in_hunk = True
+        elif in_hunk and line.startswith("+"):
+            out.append(line[1:])
+    return out
+
+
+def message_text(clone: str, raw: str) -> str:
+    """A commit message as git will record it: comment lines and a verbose diff removed."""
+    char = git(clone, "config", "core.commentChar") or "#"
+    char = "#" if char == "auto" else char
+    lines = []
+    for line in raw.splitlines():
+        if line.startswith(char) and ">8" in line:
+            break                           # the scissors line: everything below is the diff
+        if not line.startswith(char):
+            lines.append(line)
+    return "\n".join(lines)
 
 
 def repo_slug(clone: str) -> str:
@@ -132,8 +191,7 @@ def cmd_commit_msg(a, cfg: Config) -> int:
     public, keys = gated(a.C, cfg)
     if not public:
         return 0
-    text = "\n".join(l for l in Path(a.file).read_text(encoding="utf-8").splitlines()
-                     if not l.startswith("#"))
+    text = message_text(a.C, Path(a.file).read_text(encoding="utf-8"))
     return report(scan(text, cfg, "commit message", keys), "this commit message")
 
 
@@ -143,16 +201,19 @@ def cmd_pre_pr(a, cfg: Config) -> int:
         print("public-repo gate: private repository, nothing to check")
         return 0
     base = a.base or git(a.C, "symbolic-ref", "--short", "refs/remotes/origin/HEAD") or "origin/main"
-    if not git(a.C, "rev-parse", "--verify", "--quiet", base):
-        print(f"public-repo gate: base {base!r} does not resolve", file=sys.stderr)
-        return 2
-    found = scan(git(a.C, "rev-parse", "--abbrev-ref", "HEAD"), cfg, "branch name", keys)
-    for sha in git(a.C, "rev-list", f"{base}..HEAD").split():
-        found += scan(git(a.C, "log", "-1", "--format=%B", sha), cfg, f"commit {sha[:12]}", keys)
-    found += scan(git(a.C, "diff", "--name-only", f"{base}...HEAD"), cfg, "file name", keys)
-    added = [l[1:] for l in git(a.C, "diff", "--unified=0", f"{base}...HEAD").splitlines()
-             if l.startswith("+") and not l.startswith("+++")]
-    found += scan("\n".join(added), cfg, "added line", keys)
+    git_strict(a.C, "rev-parse", "--verify", f"{base}^{{commit}}")
+    git_strict(a.C, "merge-base", base, "HEAD")      # an orphan or shallow branch is not judged
+    found = []
+    if a.title is not None:
+        found += scan(a.title, cfg, "PR title", keys)
+    if a.body_file:
+        found += scan(Path(a.body_file).read_text(encoding="utf-8"), cfg, "PR body", keys)
+    found += scan(git_strict(a.C, "rev-parse", "--abbrev-ref", "HEAD"), cfg, "branch name", keys)
+    for sha in git_strict(a.C, "rev-list", f"{base}..HEAD").split():
+        found += scan(git_strict(a.C, "log", "-1", "--format=%B", sha), cfg, f"commit {sha[:12]}", keys)
+    found += scan(git_strict(a.C, "diff", "--name-only", f"{base}...HEAD"), cfg, "file name", keys)
+    diff = git_strict(a.C, "diff", "--unified=0", "--no-color", "--no-ext-diff", f"{base}...HEAD")
+    found += scan("\n".join(added_lines(diff)), cfg, "added line", keys)
     return report(found, "this branch")
 
 
@@ -200,12 +261,18 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("file")
         if name == "pre-pr":
             p.add_argument("--base", help="default: origin/HEAD, else origin/main")
+            p.add_argument("--title", help="the pull request's title")
+            p.add_argument("--body-file", help="a file holding the pull request's body")
     a = ap.parse_args(argv)
-    cfg = load_config(a.config)
-    if a.cmd == "visibility":
-        print(repo_visibility(a.repo))
-        return 0
-    return {"setup": cmd_setup, "commit-msg": cmd_commit_msg, "pre-pr": cmd_pre_pr}[a.cmd](a, cfg)
+    try:
+        cfg = load_config(a.config)
+        if a.cmd == "visibility":
+            print(repo_visibility(a.repo))
+            return 0
+        return {"setup": cmd_setup, "commit-msg": cmd_commit_msg, "pre-pr": cmd_pre_pr}[a.cmd](a, cfg)
+    except (GateError, OSError) as exc:
+        print(f"public-repo gate: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

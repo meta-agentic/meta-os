@@ -160,6 +160,47 @@ class GateTests(unittest.TestCase):
         self.env["FAKE_VISIBILITY"] = "private"
         self.assertEqual(self.pre_pr(c).returncode, 0)
 
+    def test_pre_pr_fails_closed_on_a_git_error(self):
+        # An orphan branch has no merge base: the diff cannot be judged, so it must not pass.
+        c = Clone(self.tmp)
+        c.git("checkout", "-q", "--orphan", "feat/orphan")
+        self.commit_no_hook(c, "a.txt", f"see {KEY}\n", "add a")
+        r = self.pre_pr(c)
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn("merge-base", r.stderr)
+
+    def test_pre_pr_scans_the_pr_title_body_and_a_plus_plus_line(self):
+        c = Clone(self.tmp)
+        c.git("checkout", "-q", "-b", "feat/parser")
+        self.commit_no_hook(c, "a.txt", "parser\n", "fix the parser")
+        body = self.tmp / "body.md"
+        body.write_text(f"closes {KEY}\n")
+        base = ["pre-pr", "-C", str(c.dir), "--base", "origin/main"]
+        self.assertEqual(self.gate(*base, "--title", f"{KEY}: fix").returncode, 1)
+        self.assertEqual(self.gate(*base, "--body-file", str(body)).returncode, 1)
+        self.commit_no_hook(c, "b.txt", f"+ {KEY}\n", "add b")     # the diff line reads '++ <key>'
+        self.assertEqual(self.pre_pr(c).returncode, 1)
+
+    def test_a_bad_config_is_an_error_not_a_fallback(self):
+        c = Clone(self.tmp)
+        msg = self.tmp / "msg"
+        msg.write_text("clean\n")
+        for gate in ({"keyPatern": "x"}, {"exemptRepos": "acme/tracker"}, {"keyPattern": "("}):
+            with self.subTest(gate=gate):
+                self.write_config(gate)
+                self.assertEqual(self.gate("commit-msg", "-C", str(c.dir), str(msg)).returncode, 2)
+
+    def test_commit_msg_honours_the_comment_char_and_scissors(self):
+        c = Clone(self.tmp)
+        c.git("config", "core.commentChar", ";")
+        msg = self.tmp / "msg"
+        msg.write_text(f"fix the parser\n; a comment naming {KEY}\n")
+        self.assertEqual(self.gate("commit-msg", "-C", str(c.dir), str(msg)).returncode, 0)
+        msg.write_text(f"fix the parser\n# not a comment here: {KEY}\n")
+        self.assertEqual(self.gate("commit-msg", "-C", str(c.dir), str(msg)).returncode, 1)
+        msg.write_text(f"fix\n; ------------------------ >8 ------------------------\n+{KEY}\n")
+        self.assertEqual(self.gate("commit-msg", "-C", str(c.dir), str(msg)).returncode, 0)
+
     @staticmethod
     def commit_no_hook(c: Clone, name: str, text: str, message: str):
         (c.dir / name).write_text(text)

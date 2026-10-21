@@ -11,7 +11,7 @@ This folder is **mechanism, not policy** — instances mount it rather than copy
 must run unchanged in every one of them: it holds no repository names, no budgets, no
 prompts. An instance supplies a config file and a state directory (with `visibility_probe: true`
 there, each run's repository is probed through [[scripts/_index|scripts/public_repo_gate.py]]
-and a repository not proven private gets a branch name without the item id); a harness in the
+and a repository not proven private gets a branch name without the item id or any key its title cites, the public-repository note, and an empty `{pr_title_prefix}` where a private one gets `<id>: `); a harness in the
 instance executes what `tick.py plan` emits and feeds the outcome back through
 `tick.py record`.
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -104,6 +105,17 @@ class ReadySetTests(unittest.TestCase):
         self.assertNotIn("SPACEA-4", infra.branch)
         app = next(i for i in ready if i.repo == "org/app")
         self.assertIn(app.id, app.branch, "a repo the probe proves private keeps its id")
+        self.assertTrue(infra.public); self.assertFalse(app.public)
+
+    def test_public_slug_drops_keys_the_title_cites(self):
+        # Must fail if the slug keeps them: the gate's setup would refuse the assigned branch.
+        tier, text = item("SPACEA-7", "REFINED", "Re-plan SPACEB-S3 around " + "AB" + "-12 outage")
+        write(os.path.join(self.v.dir, "spacea", tier, "SPACEA-7.md"), text)
+        cfg = {**CFG, "spaces": {"spacea": {**CFG["spaces"]["spacea"], "public": True, "branch_prefix": "p/"}}}
+        own = readyset.ready_items(self.v.dir, cfg, key_re=re.compile(r"(?i)\bSPACE[AB]-S?[0-9]+"))
+        self.assertEqual(next(i for i in own if i.id == "SPACEA-7").branch, "p/re-plan-around-ab-12")
+        shape = readyset.ready_items(self.v.dir, cfg)
+        self.assertNotIn("ab-12", next(i for i in shape if i.id == "SPACEA-7").branch)
 
     def test_assign_one_rule_and_fairness(self):
         ready = readyset.ready_items(self.v.dir, CFG)
@@ -185,6 +197,29 @@ class LedgerTests(unittest.TestCase):
 
 
 class TickEndToEnd(unittest.TestCase):
+    def test_probed_public_repo_gets_the_note_and_no_id_in_the_title(self):
+        # Must fail if the prompt still reads the space's flag: no space here declares `public`.
+        v = FakeVault(); state = tempfile.mkdtemp(); cfgdir = tempfile.mkdtemp()
+        probe = tick.visibility_probe
+        try:
+            tick.visibility_probe = lambda cfg: ((lambda repo: "public"), None)
+            model = os.path.join(os.path.dirname(os.path.dirname(HERE)), "systems", "pipeline", "queueing-model.py")
+            cfg = dict(CFG, vault=v.dir, model_path=model, backlog_cli=None, vault_autocommit=False,
+                       public_repo_note="PUBLIC RULE", lane_prompt="{public_note}|title: {pr_title_prefix}summary",
+                       regulator={"N0": 3, "N_min": 1, "N_max": 4, "budget": 20, "window_hours": 5, "lane_cap": 12})
+            cfg_path = os.path.join(cfgdir, "config.yaml")
+            import yaml
+            write(cfg_path, yaml.safe_dump(cfg))
+            plan_path = os.path.join(state, "plan.json")
+            self.assertEqual(tick.main(["--config", cfg_path, "--state", state, "plan", "--out", plan_path]), 0)
+            spawn = json.load(open(plan_path))["spawn"]
+            self.assertTrue(spawn)
+            for s in spawn:
+                self.assertEqual(s["prompt"], "PUBLIC RULE|title: summary")
+        finally:
+            tick.visibility_probe = probe
+            v.cleanup(); shutil.rmtree(state, ignore_errors=True); shutil.rmtree(cfgdir, ignore_errors=True)
+
     def test_plan_record_report(self):
         v = FakeVault(); state = tempfile.mkdtemp(); cfgdir = tempfile.mkdtemp()
         try:

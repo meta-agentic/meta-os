@@ -21,6 +21,8 @@ except ImportError as exc:  # pragma: no cover
 
 FRONT = re.compile(r"^---\n(.*?)\n---", re.S)
 TAG = re.compile(r"^\s*'?\[([A-Z][A-Z0-9-]*)\]")
+# Key-shaped tokens a public branch slug drops when the instance supplies no pattern of its own.
+KEYISH = re.compile(r"(?<![A-Za-z0-9])[A-Za-z]{2,5}-[Ss]?[0-9]+")
 
 
 @dataclass
@@ -39,6 +41,7 @@ class Item:
     primary_tag: str = ""
     repo: str = ""
     branch: str = ""
+    public: bool = False
     order: tuple = field(default_factory=tuple)
 
 
@@ -122,11 +125,12 @@ def slug(title: str, n: int = 4) -> str:
     return "-".join(words[:n]) or "item"
 
 
-def ready_items(vault: str, cfg: dict, visibility=None) -> list[Item]:
+def ready_items(vault: str, cfg: dict, visibility=None, key_re=None) -> list[Item]:
     """Ordered ready set: committed-to-sprint first, then priority, then points ascending.
 
     `visibility(repo) -> 'public' | 'private'` probes each item's repository; with it, a repo
-    is public unless it proves private, whatever the space's `public:` flag says.
+    is public unless it proves private, whatever the space's `public:` flag says. A public
+    repository's branch slug drops the keys its title cites (`key_re`, default `KEYISH`).
     """
     spaces_cfg: dict = cfg.get("spaces") or {}
     executable = [s for s, c in spaces_cfg.items() if c.get("executable", True)]
@@ -151,9 +155,10 @@ def ready_items(vault: str, cfg: dict, visibility=None) -> list[Item]:
             continue
         # A public repository must not carry tracker ids in branch names, commits or PRs
         # (the framework's public-safety rule); the lane prompt says the same.
-        public = scfg.get("public") or (visibility is not None and visibility(it.repo) != "private")
+        it.public = bool(scfg.get("public")) or (visibility is not None and visibility(it.repo) != "private")
         prefix = scfg.get("branch_prefix", it.space.upper() + "/")
-        it.branch = f"{prefix}{slug(it.title, 5)}" if public else f"{prefix}{it.id}-{slug(it.title)}"
+        it.branch = (f"{prefix}{slug((key_re or KEYISH).sub(' ', it.title), 5)}" if it.public
+                     else f"{prefix}{it.id}-{slug(it.title)}")
         it.order = (0 if it.committed else 1, it.priority, it.points, it.id)
         out.append(it)
     out.sort(key=lambda i: i.order)

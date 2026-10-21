@@ -43,13 +43,18 @@ def load_config(path: str) -> dict:
     return cfg
 
 
-def visibility_probe(cfg: dict):
-    """The public-repo gate's probe, once per repository per tick, when `visibility_probe` is on."""
+def visibility_probe(cfg: dict) -> tuple:
+    """(probe, key pattern) from the public-repo gate when `visibility_probe` is on, else (None, None).
+
+    The probe runs once per repository per tick; the pattern is the instance's `publicRepoGate`
+    one, so a public branch slug drops exactly the keys the gate would refuse.
+    """
     if not cfg.get("visibility_probe"):
-        return None
+        return None, None
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
     import public_repo_gate  # noqa: E402  (scripts/ sits beside pipeline/ in the framework and every instance)
-    return functools.lru_cache(maxsize=None)(public_repo_gate.repo_visibility)
+    gate_cfg = public_repo_gate.load_config(None)
+    return functools.lru_cache(maxsize=None)(public_repo_gate.repo_visibility), gate_cfg.key_re
 
 
 def item_body(path: str, limit: int) -> str:
@@ -121,7 +126,7 @@ def cmd_plan(cfg: dict, led: Ledger, out_path: str | None) -> int:
         # ---- ready set and saturation
         retries: dict = state.get("retries") or {}
         max_retries = int(cfg.get("max_retries", 2))
-        ready = [it for it in readyset.ready_items(cfg["vault"], cfg, visibility_probe(cfg))
+        ready = [it for it in readyset.ready_items(cfg["vault"], cfg, *visibility_probe(cfg))
                  if int(retries.get(it.id, 0)) < max_retries]
         active = [l for l in lanes if l.get("status") in ACTIVE]
         lanes_saturated = len(active) >= int(state["N"]) and bool(ready)
@@ -183,10 +188,11 @@ def cmd_plan(cfg: dict, led: Ledger, out_path: str | None) -> int:
             chosen = readyset.assign(ready, lanes, free, cfg_for_assign, paused) if free > 0 else []
             for it in chosen:
                 lane_id = f"L{tick}-{uuid.uuid4().hex[:6]}"
-                public = bool((cfg.get("spaces") or {}).get(it.space, {}).get("public"))
+                # The repository's visibility, probed or declared, decides the note and the title rule.
                 prompt = render(cfg.get("lane_prompt", ""), id=it.id, title=it.title, repo=it.repo, branch=it.branch,
                                 space=it.space, item_body=item_body(it.path, int(cfg.get("item_body_limit", 12000))),
-                                public_note=(cfg.get("public_repo_note", "") if public else ""))
+                                public_note=(cfg.get("public_repo_note", "") if it.public else ""),
+                                pr_title_prefix=("" if it.public else f"{it.id}: "))
                 lane = {"lane_id": lane_id, "kind": "work", "item": it.id, "space": it.space, "repo": it.repo,
                         "branch": it.branch, "primary_tag": it.primary_tag, "status": "spawning",
                         "planned_tick": tick, "planned_ts": now, "usage": [], "points": it.points}

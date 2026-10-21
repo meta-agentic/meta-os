@@ -122,19 +122,6 @@ def added_lines(diff: str) -> list[str]:
     return out
 
 
-def message_text(clone: str, raw: str) -> str:
-    """A commit message as git will record it: comment lines and a verbose diff removed."""
-    char = git(clone, "config", "core.commentChar") or "#"
-    char = "#" if char == "auto" else char
-    lines = []
-    for line in raw.splitlines():
-        if line.startswith(char) and ">8" in line:
-            break                           # the scissors line: everything below is the diff
-        if not line.startswith(char):
-            lines.append(line)
-    return "\n".join(lines)
-
-
 def repo_slug(clone: str) -> str:
     m = GITHUB_RE.search(git(clone, "remote", "get-url", "origin"))
     return f"{m.group(1)}/{m.group(2)}" if m else ""
@@ -191,7 +178,10 @@ def cmd_commit_msg(a, cfg: Config) -> int:
     public, keys = gated(a.C, cfg)
     if not public:
         return 0
-    text = message_text(a.C, Path(a.file).read_text(encoding="utf-8"))
+    # Every line, comment-looking ones included: `git commit -m` cleans up whitespace only, so a
+    # '#' line or a scissors line is recorded as written. A key in an editor comment is a false
+    # reject, which errs safe.
+    text = Path(a.file).read_text(encoding="utf-8")
     return report(scan(text, cfg, "commit message", keys), "this commit message")
 
 

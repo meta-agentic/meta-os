@@ -116,6 +116,13 @@ class ReadySetTests(unittest.TestCase):
         self.assertEqual(next(i for i in own if i.id == "SPACEA-7").branch, "p/re-plan-around-ab-12")
         shape = readyset.ready_items(self.v.dir, cfg)
         self.assertNotIn("ab-12", next(i for i in shape if i.id == "SPACEA-7").branch)
+        self.assertEqual(next(i for i in shape if i.id == "SPACEA-4").branch, "p/infra-other",
+                         "the leading [TAG] is dropped before lower-casing, not kept as a word")
+
+    def test_public_slug_rescans_until_no_key_is_left(self):
+        # Dropping the middle token joins the rest into a new key; one pass would keep it.
+        title = "Spike " + "QQ" + "-SPIKE-S0-01 outage plan"
+        self.assertEqual(readyset.public_slug(title, readyset.KEYISH), "spike-outage-plan")
 
     def test_assign_one_rule_and_fairness(self):
         ready = readyset.ready_items(self.v.dir, CFG)

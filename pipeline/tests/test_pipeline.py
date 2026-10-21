@@ -96,6 +96,15 @@ class ReadySetTests(unittest.TestCase):
         for it in ready:
             self.assertTrue(it.branch.startswith("pipeline/")); self.assertNotIn(it.id, it.branch)
 
+    def test_probed_public_repo_overrides_a_missing_flag(self):
+        # Must fail if the probe is ignored: no space declares `public`, the probe says org/infra is.
+        probe = {"org/infra": "public"}.get
+        ready = readyset.ready_items(self.v.dir, CFG, lambda repo: probe(repo, "private"))
+        infra = next(i for i in ready if i.id == "SPACEA-4")
+        self.assertNotIn("SPACEA-4", infra.branch)
+        app = next(i for i in ready if i.repo == "org/app")
+        self.assertIn(app.id, app.branch, "a repo the probe proves private keeps its id")
+
     def test_assign_one_rule_and_fairness(self):
         ready = readyset.ready_items(self.v.dir, CFG)
         chosen = readyset.assign(ready, [], 4, CFG)

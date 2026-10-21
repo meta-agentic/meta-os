@@ -30,6 +30,17 @@
       ],
       "additionalProperties": false
     },
+    "publicRepoGate": {
+      "type": "object",
+      "description": "The instance's settings for scripts/public_repo_gate.py: what counts as instance data in a public repository. Every key is optional; omitted, the framework's key shape and home-path check apply.",
+      "properties": {
+        "keyPattern": {"type": "string", "description": "Regex matching this instance's tracker keys; replaces the framework's generic key shape."},
+        "allowedTokens": {"type": "array", "items": {"type": "string"}, "description": "Exact tokens that match the key pattern and are not keys, added to the framework's allow-list."},
+        "exemptRepos": {"type": "array", "items": {"type": "string"}, "description": "OWNER/NAME of public repositories whose text carries tracker keys by design; machine paths are still checked there."},
+        "pathPrefixes": {"type": "array", "items": {"type": "string"}, "description": "Absolute path prefixes that are instance data, besides any home path."}
+      },
+      "additionalProperties": false
+    },
     "vars": {
       "type": "object",
       "description": "Reusable string prefixes. ${name} in any config value (or a projects/*.md 'path:') expands to these, so a repo-root move is a one-line change.",

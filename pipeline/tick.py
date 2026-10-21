@@ -15,6 +15,7 @@ writer of item status), and commits the vault. `report` renders the window for t
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import os
 import subprocess
@@ -40,6 +41,15 @@ def load_config(path: str) -> dict:
         if cfg.get(key) and not os.path.isabs(cfg[key]):
             cfg[key] = os.path.normpath(os.path.join(base, cfg[key]))
     return cfg
+
+
+def visibility_probe(cfg: dict):
+    """The public-repo gate's probe, once per repository per tick, when `visibility_probe` is on."""
+    if not cfg.get("visibility_probe"):
+        return None
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
+    import public_repo_gate  # noqa: E402  (scripts/ sits beside pipeline/ in the framework and every instance)
+    return functools.lru_cache(maxsize=None)(public_repo_gate.repo_visibility)
 
 
 def item_body(path: str, limit: int) -> str:
@@ -111,7 +121,8 @@ def cmd_plan(cfg: dict, led: Ledger, out_path: str | None) -> int:
         # ---- ready set and saturation
         retries: dict = state.get("retries") or {}
         max_retries = int(cfg.get("max_retries", 2))
-        ready = [it for it in readyset.ready_items(cfg["vault"], cfg) if int(retries.get(it.id, 0)) < max_retries]
+        ready = [it for it in readyset.ready_items(cfg["vault"], cfg, visibility_probe(cfg))
+                 if int(retries.get(it.id, 0)) < max_retries]
         active = [l for l in lanes if l.get("status") in ACTIVE]
         lanes_saturated = len(active) >= int(state["N"]) and bool(ready)
 

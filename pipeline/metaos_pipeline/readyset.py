@@ -122,8 +122,12 @@ def slug(title: str, n: int = 4) -> str:
     return "-".join(words[:n]) or "item"
 
 
-def ready_items(vault: str, cfg: dict) -> list[Item]:
-    """Ordered ready set: committed-to-sprint first, then priority, then points ascending."""
+def ready_items(vault: str, cfg: dict, visibility=None) -> list[Item]:
+    """Ordered ready set: committed-to-sprint first, then priority, then points ascending.
+
+    `visibility(repo) -> 'public' | 'private'` probes each item's repository; with it, a repo
+    is public unless it proves private, whatever the space's `public:` flag says.
+    """
     spaces_cfg: dict = cfg.get("spaces") or {}
     executable = [s for s, c in spaces_cfg.items() if c.get("executable", True)]
     sprints = active_sprints(vault)
@@ -147,8 +151,9 @@ def ready_items(vault: str, cfg: dict) -> list[Item]:
             continue
         # A public repository must not carry tracker ids in branch names, commits or PRs
         # (the framework's public-safety rule); the lane prompt says the same.
+        public = scfg.get("public") or (visibility is not None and visibility(it.repo) != "private")
         prefix = scfg.get("branch_prefix", it.space.upper() + "/")
-        it.branch = f"{prefix}{slug(it.title, 5)}" if scfg.get("public") else f"{prefix}{it.id}-{slug(it.title)}"
+        it.branch = f"{prefix}{slug(it.title, 5)}" if public else f"{prefix}{it.id}-{slug(it.title)}"
         it.order = (0 if it.committed else 1, it.priority, it.points, it.id)
         out.append(it)
     out.sort(key=lambda i: i.order)

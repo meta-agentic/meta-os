@@ -24,8 +24,9 @@ records the prototype it grew from. Where an evidence page and this page differ,
 wins. Folder index: [[systems/pipeline/_index|pipeline/]].
 
 **How to read it.** Every requirement is testable, and every one that needs a number states
-it. A number marked *(proposal)* is the default until the instance's PO decides; the instance
-records the answer in its own tracker, never here, and this page is updated to match.
+it. The numbers and rules left open by the first draft were ruled on 2026-10-21 (§14) and are
+stated here as values. A later change is recorded in the instance's own tracker, never here,
+and this page is updated to match; a new number not yet ruled is marked *(proposal)*.
 Examples are generic; the instance keeps its worked examples on real items next to its
 decision record.
 
@@ -215,9 +216,9 @@ a story the vault does not admit.
 
 | Event | Response | Number |
 |---|---|---|
-| A small change: the diff since the last plan touches at most K items or one lane | incremental repair of the last plan, minimal disruption | K = 5 *(proposal)* |
-| A repair whose edit distance exceeds the churn cap | discard, solve cold | cap = 10 *(proposal)* |
-| Window start, or the full-replan interval elapsed | cold solve | every 6 h *(proposal)* |
+| A small change: the diff since the last plan touches at most K items or one lane | incremental repair of the last plan, minimal disruption | K = 5 |
+| A repair whose edit distance exceeds the churn cap | discard, solve cold | cap = 10 |
+| Window start, or the full-replan interval elapsed | cold solve | every 6 h |
 | A sudden budget drop (`m_cap` falls by more than one) | drop the lowest-priority runs from the plan; no running item is stopped | — |
 | The loop reorders the planner's admissible order | allowed, one recorded reason per change, counted as a gauge | — |
 
@@ -242,26 +243,28 @@ with a reason. The pipe wins: a lane cannot run while the pipe is paused, stoppe
 
 ### 6.2 Controls
 
-| Control | Effect at the next tick |
+| Control | Effect |
 |---|---|
-| **pause** (lane or pipe) | no new item is taken; the running item finishes |
-| **stop** (lane or pipe) | sessions interrupted now; the item goes back to `REFINED` with a *stopped by human* note and **no** retry increment; worktree released |
-| **start** (lane or pipe) | resume from `paused` or `stopped`; refused while the pipe is frozen, with the reason recorded |
-| **bind** (lane, project) | if the lane is working, it drains first; then it binds |
+| **pause** (lane or pipe) | at the next tick: no new item is taken; the running item finishes |
+| **stop** (lane or pipe) | immediately, without waiting for a tick: sessions interrupted; the item goes back to `REFINED` with a *stopped by human* note and **no** retry increment; worktree released |
+| **start** (lane or pipe) | at the next tick: resume from `paused` or `stopped`; refused while the pipe is frozen, with the reason recorded |
+| **bind** (lane, project) | at the next tick: if the lane is working, it drains first; then it binds |
 | **unfreeze** (pipe) | human only; the loop never clears a freeze |
 
 Every control is an event with actor, reason and time; its application is a second event with
-the latency from request to effect. **Acknowledgement bound:** at most one tick interval
-*(proposal: tick interval 10 min, so ≤ 10 min)*; the dashboard shows the control as *pending*
-until the application event exists.
+the latency from request to effect. **Acknowledgement bound:** a stop interrupts the session
+at once; pause, start and bind act within one tick interval (10 min). The dashboard shows the
+control as *pending* until the application event exists.
 
 ### 6.3 Cadence
 
 | Quantity | Value |
 |---|---|
-| Tick interval | 10 min *(proposal)*, and an early tick when a run ends or a control is made |
+| Tick interval | 10 min, and an early tick when a run ends or a control is made |
 | Heartbeat poll of running sessions | every tick, and by a lighter heartbeat between ticks if the tick interval is raised |
-| Lanes in the proof-of-concept (`m_max`) | 3 *(proposal)* |
+| Lanes in the proof-of-concept (`m_max`) | 3 |
+| Executable spaces in the proof of concept | two now; a third joins once the public-repository instance-data gate is in place |
+| Review-queue cap per space in the proof of concept (§5.1 rule 7) | 4 |
 
 ### 6.4 Runtime
 
@@ -270,10 +273,11 @@ where the planner of record is reachable: while the solver is local-only, that i
 that hosts it; once the solver is a reachable service, any host that reaches it. A routine
 wakes at most hourly, so the inner cadence of §6.3 comes from the loop itself.
 
-*Proposal:* a self-paced loop inside one persistent session on the solver's host, sleeping
-the tick interval between ticks and woken early by run-ending events; a local scheduler
-restarts it if it dies, and the restarted loop resumes from the last committed tick. A loop
-started where the solver is unreachable runs on reasoning and says so on every tick.
+The runtime is a self-paced loop inside one persistent session on the solver's host, sleeping
+the tick interval between ticks and woken early by run-ending events and controls; a local
+scheduler restarts it if it dies, and the restarted loop resumes from the last committed tick.
+A loop started where the solver is unreachable runs on reasoning and says so on every tick. A
+hosted runtime is a later decision.
 
 ## 7 · Budget: the two windows and the lane cap
 
@@ -301,10 +305,10 @@ observed, `ĝ_w` is seeded from the instance's declared calibration and flagged 
 
 | Parameter | Value |
 |---|---|
-| `ρ_5h` | 0.15 *(proposal)* |
-| `ρ_week` | 0.10 *(proposal)* |
-| `K` (EWMA span) | 6 ticks *(proposal)* |
-| Spending the week faster than pro rata | not allowed *(proposal)* |
+| `ρ_5h` | 0.15 |
+| `ρ_week` | 0.10 |
+| `K` (EWMA span) | 6 ticks |
+| Spending the week faster than pro rata | not allowed |
 | Last hour before a reset | no start whose expected cost (`ĉ_w = ĝ_w ×` expected run hours) exceeds what is left above the reserve |
 | No sensor answers | fall back to the declared budget per hour, loudly (an event and a gauge), never silently |
 | Per-run cap | expected cost × 3; over it, the run is interrupted and given back |
@@ -365,16 +369,16 @@ sessions.
 
 | Condition | Test | Action |
 |---|---|---|
-| **Stale lane** | no session event and no new commit on the run's branch for `stale_after`; or the session ended or failed without a PR; or the run is over its cap; or the session cannot be found | interrupt, reap, give the item back with retry + 1 and the reason |
+| **Stale lane** | no session activity of any kind (a tool call, a commit, a message) for `stale_after`, so a long build is not reaped; or the session ended or failed without a PR; or the run is over its cap; or the session cannot be found | interrupt, reap, give the item back with retry + 1 and the reason |
 | **Held** | the same item reaped `max_stale_reaps` times | hold it (a *needs PO* label and a raised blocker); it is no longer admissible |
 | **Deadlock or accounting anomaly** | a running item's blocker is not `DONE`; an `IN PROGRESS` item with no lane (orphan); one item on two lanes; a session recorded under two projects; tokens in use not matching items in flight; the record and the vault disagree | freeze the pipe with the reason; no reap, no transition |
 | **Unsafe ground** | a red default branch in a lane's project; the backlog's schema gate failing; a fetch of the backlog or the record failing | freeze the pipe with the reason |
-| **Stall** | every lane idle while admissible items exist for 3 ticks *(proposal)*; nothing admissible while open work waits in review; the loop's own last tick older than two intervals | report in the window report and as a gauge; never freeze |
+| **Stall** | every lane idle while admissible items exist for 3 ticks; nothing admissible while open work waits in review; the loop's own last tick older than two intervals | report in the window report and as a gauge; never freeze |
 
 | Parameter | Value |
 |---|---|
-| `stale_after` | 2 ticks (20 min at the proposed interval) *(proposal)* |
-| `max_stale_reaps` | 2 *(proposal)* |
+| `stale_after` | 2 ticks (20 min) |
+| `max_stale_reaps` | 2 |
 
 The watchdog's only backlog arc is the give-back; it never merges, closes, creates or widens
 anything.
@@ -384,10 +388,13 @@ anything.
 A private repository named in the instance config, never the framework repository, never a
 place for secrets. It holds the loop's state (pipe, lanes, controls), each tick's plan and
 results, an append-only event log, the run log, the reflections, and the window reports.
-Tracker ids may appear in it. The loop fetches before every write and commits once per tick
-phase; a push that is not a fast-forward means another loop wrote, and this one stops. The
+Tracker ids may appear in it. The loop fetches before every write and makes one commit per
+tick. A tick in which nothing happened amends the previous tick's commit, but only while that
+commit is unpushed: a pushed commit is never rewritten and the loop never force-pushes. It
+pushes on a meaningful event (a start, an end, a reap, a control, a freeze) and at least
+hourly. A push that is not a fast-forward means another loop wrote, and this one stops. The
 window report is also filed in the instance's memory. Retention: everything is kept, since it
-is text and the history is the audit trail *(proposal)*.
+is text and the history is the audit trail.
 
 ## 11 · Configuration
 
@@ -399,13 +406,13 @@ spaces); the model's keys and defaults are:
 
 | Key | Meaning | Default |
 |---|---|---|
-| `lanes` | `m_max`, the lane slots | 5 from the sizing (§2); 3 *(proposal)* for a proof of concept |
+| `lanes` | `m_max`, the lane slots | 5 from the sizing (§2); 3 for a proof of concept |
 | `tokens` | `N`, the CONWIP cap | `2 × lanes` |
 | `fairness_share` | the largest share of the tokens one space may hold | 0.5 |
 | `automerge_classes` | change classes that skip the PO | `[]` |
 | `review_sla_days` | the review-age limit that stops new work for a space | 5 |
 | `lane_budget` | a run's cap before it is reaped: its expected cost × 3 | 3 |
-| `tick` | the tick interval | 10 min *(proposal)*; hourly is too slow to re-plan |
+| `tick` | the tick interval | 10 min; hourly is too slow to re-plan |
 
 ## 12 · Failure modes this design closes
 
@@ -449,15 +456,23 @@ backlog and records the outcome next to its decisions.
 10. **Not executable.** An admissible-looking item in a space the instance does not declare
     executable is never assigned, and is reported as *not executable*.
 
-## 14 · Decisions this specification leaves to the PO
+## 14 · Decisions ruled (2026-10-21)
 
-Nine, each with the proposal above as its default: the lane model (§6.3, `m_max`, drain); control
-semantics (§6.2, acknowledgement bound); budget policy (§7, reserves, `K`, shape, last hour);
-what the record repository logs and keeps (§10); the dashboard's write exception (§8.2); the
-loop runtime (how it is woken, where it runs so that the solver is reachable, and how it
-survives a reclaimed container); stale and deadlock thresholds (§9); proof-of-concept scope
-(executable spaces and `m_max`); and the planning policy (§5.3). The instance records each
-answer in its own tracker; this page then drops the *(proposal)* mark from the number.
+The first draft left nine decisions open, each with a proposed default. The instance's
+maintainer ruled all nine on 2026-10-21; the sections above state the result.
+
+1. **Lane model** (§6.3): accepted as proposed; three lanes, a bound lane may sit idle, a lane drains before it rebinds, and no session serves two projects.
+2. **Controls** (§6.2): accepted, amended; stop interrupts the session immediately, pause and start act within one tick, and the pipe beats the lane.
+3. **Budget** (§7): accepted as proposed; reserves 0.15 and 0.10, per-window mileage over 6 ticks, the week spent no faster than pro rata, and the last-hour rule.
+4. **Record repository** (§10): accepted, amended; the instance's private record repository, named in configuration, gets one commit per tick, an idle tick amends only an unpushed commit, nothing is force-pushed, and it is pushed on a meaningful event or at least hourly.
+5. **Dashboard writes** (§8.2): accepted as proposed; start, pause, stop and bind per lane and pipe, through the CLI, only on a local-source dashboard with the instance setting on.
+6. **Loop runtime** (§6.4): accepted as proposed; a self-paced loop in one persistent session on the solver's host, a 10-minute tick, restarted by a local scheduler.
+7. **Thresholds** (§9): accepted, amended; liveness is any session activity, stale after 2 ticks without it, a run capped at three times its estimate, held after 2 reaps, and a stall reported after 3 idle ticks with admissible work.
+8. **Proof-of-concept scope** (§6.3): accepted, amended; two executable spaces now, a third once the public-repository instance-data gate exists, three lanes, and a review-queue cap of 4 per space.
+9. **Planning** (§5.3): accepted as proposed; the solver when reachable and reasoning otherwise, repair up to 5 items or one lane, a churn cap of 10, a cold solve every 6 h and at window start, and the lowest-priority runs dropped on a budget fall without stopping a running item.
+
+The thresholds are revisited once the first window reports exist; a change is recorded in the
+instance's own tracker and this page is updated to match.
 
 ## What this is not
 

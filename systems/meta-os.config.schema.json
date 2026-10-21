@@ -41,6 +41,62 @@
       },
       "additionalProperties": false
     },
+    "swarm": {
+      "type": "object",
+      "description": "The autonomous pipeline's bounds, cadence and identities (systems/pipeline.md). The loop reads these and never writes them; prompts and repository routing stay in the pipeline's own configuration file. Every key is optional; omitted, the default applies.",
+      "properties": {
+        "lanes": {"type": "integer", "description": "m_max: the lane slots. The sizing rule gives 5; a proof of concept uses 3.", "default": 5, "minimum": 1},
+        "min_lanes": {"type": "integer", "description": "m_min: the fewest working lanes the regulator keeps while the pipe runs.", "default": 1, "minimum": 1},
+        "tokens": {"type": "integer", "description": "N: the CONWIP cap, items from start until DONE or NO GO. Set by a human from the sizing; default twice `lanes`.", "minimum": 1},
+        "fairness_share": {"type": "number", "description": "The largest share of the tokens one space may hold.", "default": 0.5, "minimum": 0, "maximum": 1},
+        "automerge_classes": {"type": "array", "items": {"type": "string"}, "default": [], "description": "Change classes that merge without the human station."},
+        "review_sla_days": {"type": "number", "description": "The review-age limit: a space whose oldest item in review is older takes no new work.", "default": 5, "minimum": 0},
+        "review_queue_cap": {"type": "integer", "description": "The most items one space may hold in review before it takes no new work.", "default": 4, "minimum": 1},
+        "lane_budget": {"type": "number", "description": "A run's cap, as a multiple of its expected cost; over it the run is interrupted and given back.", "default": 3, "minimum": 1},
+        "max_retries": {"type": "integer", "description": "How many times an item may be given back before it is no longer admissible.", "default": 2, "minimum": 0},
+        "tick_minutes": {"type": "integer", "description": "The tick interval; an early tick follows a run's end or a control.", "default": 10, "minimum": 1},
+        "reserves": {
+          "type": "object",
+          "description": "The fraction of each usage window's allowance never spent.",
+          "properties": {
+            "five_hour": {"type": "number", "description": "Reserve of the 5-hour window.", "default": 0.15, "minimum": 0, "maximum": 1},
+            "week": {"type": "number", "description": "Reserve of the weekly window.", "default": 0.1, "minimum": 0, "maximum": 1}
+          },
+          "additionalProperties": false
+        },
+        "mileage_ticks": {"type": "integer", "description": "The span, in ticks, of the per-window mileage average.", "default": 6, "minimum": 1},
+        "stale_after_ticks": {"type": "integer", "description": "Ticks without any session activity before a lane is stale and reaped.", "default": 2, "minimum": 1},
+        "max_stale_reaps": {"type": "integer", "description": "Reaps of the same item before it is held for a human.", "default": 2, "minimum": 1},
+        "stall_after_ticks": {"type": "integer", "description": "Ticks with every lane idle while admissible work exists before a stall is reported.", "default": 3, "minimum": 1},
+        "executable_spaces": {"type": "array", "items": {"type": "string"}, "default": [], "description": "The spaces whose items the pipeline may start. Empty: none."},
+        "record_repository": {
+          "type": "object",
+          "description": "The private repository the loop writes its state, plans, results and events to; never the framework, never a place for secrets.",
+          "properties": {
+            "url": {"type": "string", "description": "Its remote."},
+            "path": {"type": "string", "description": "The local clone the loop writes and a local dashboard reads."}
+          },
+          "additionalProperties": false
+        },
+        "planner": {
+          "type": "object",
+          "description": "The planner port.",
+          "properties": {
+            "adapter": {"type": "string", "enum": ["command", "reasoning"], "default": "reasoning", "description": "`command` runs the configured command and falls back to reasoning on failure; `reasoning` orders the admissible set itself."},
+            "command": {"type": "array", "items": {"type": "string"}, "description": "The planner command and its arguments, for the `command` adapter."},
+            "repair_max_items": {"type": "integer", "description": "A change touching at most this many items, or one lane, is repaired rather than solved cold.", "default": 5, "minimum": 0},
+            "churn_cap": {"type": "integer", "description": "A repair whose edit distance exceeds this is discarded for a cold solve.", "default": 10, "minimum": 0},
+            "cold_every_hours": {"type": "number", "description": "Hours between scheduled cold solves; one also runs at window start.", "default": 6, "minimum": 0},
+            "repair_timeout_seconds": {"type": "number", "description": "Time allowed for a repair before the tick plans by reasoning.", "default": 30, "minimum": 1},
+            "cold_timeout_seconds": {"type": "number", "description": "Time allowed for a cold solve before the tick plans by reasoning.", "default": 90, "minimum": 1}
+          },
+          "additionalProperties": false
+        },
+        "dashboard_controls": {"type": "boolean", "default": false, "description": "Render the Pipeline tab's controls on a dashboard reading a local source. A hosted or GitHub-sourced dashboard never offers them."},
+        "visibility_probe": {"type": "boolean", "default": false, "description": "Probe each run's repository through scripts/public_repo_gate.py; one not proven private gets a key-free branch, the public note and no item id in the PR title."}
+      },
+      "additionalProperties": false
+    },
     "vars": {
       "type": "object",
       "description": "Reusable string prefixes. ${name} in any config value (or a projects/*.md 'path:') expands to these, so a repo-root move is a one-line change.",

@@ -328,7 +328,7 @@ until the reset rather than touch the reserve.
 | Command | What it does |
 |---|---|
 | `status` | Prints the pipe's desired and actual state, the freeze reason if any, both windows (remaining, reset, `ĝ_w`), `m_cap`, and one line per lane: state, project, item, elapsed, heartbeat age, retries. Read-only. |
-| `control pipe start\|pause\|stop --reason R` | Writes the pipe's desired state to the record repository as an event. Refuses on a record clone that is behind its remote. |
+| `control pipe start\|pause\|stop --reason R` | Writes the pipe's desired state to the record repository as an event, in a **control commit** of its own (never folded into a tick commit), and pushes it at once. Refuses on a record clone that is behind its remote. |
 | `control lane <id> start\|pause\|stop --reason R` | The same for one lane; refuses an unknown lane. |
 | `control lane <id> bind <project> --reason R` | Requests a rebind; drains first if the lane is working. Refuses a project the instance does not declare executable. |
 | `control pipe unfreeze --reason R` | Clears a freeze. Human only. |
@@ -388,12 +388,18 @@ anything.
 A private repository named in the instance config, never the framework repository, never a
 place for secrets. It holds the loop's state (pipe, lanes, controls), each tick's plan and
 results, an append-only event log, the run log, the reflections, and the window reports.
-Tracker ids may appear in it. The loop fetches before every write and makes one commit per
-tick. A tick in which nothing happened amends the previous tick's commit, but only while that
-commit is unpushed: a pushed commit is never rewritten and the loop never force-pushes. It
-pushes on a meaningful event (a start, an end, a reap, a control, a freeze) and at least
-hourly. A push that is not a fast-forward means another loop wrote, and this one stops. The
-window report is also filed in the instance's memory. Retention: everything is kept, since it
+Tracker ids may appear in it.
+
+It has two writers: the loop, which makes **tick commits**, and the CLI, which makes **control
+commits** (§8.1). The loop fetches before every write and makes one commit per tick. A tick in
+which nothing happened amends the previous tick's commit, but only while that commit is
+unpushed and is the loop's own: the loop never amends a commit it did not make, so a control
+commit at the tip means the next tick is a new commit. It pushes on a meaningful event (a
+start, an end, a reap, a control, a freeze) and at least hourly. When a fetch shows the remote
+has advanced, the loop looks at what arrived: if it is only control commits, the loop rebases
+its unpushed tick commits over them and carries on; a tick commit it did not make means
+another loop is running, and this one stops. Nothing is ever force-pushed, by either writer.
+The window report is also filed in the instance's memory. Retention: everything is kept, since it
 is text and the history is the audit trail.
 
 ## 11 · Configuration
@@ -411,6 +417,7 @@ spaces); the model's keys and defaults are:
 | `fairness_share` | the largest share of the tokens one space may hold | 0.5 |
 | `automerge_classes` | change classes that skip the PO | `[]` |
 | `review_sla_days` | the review-age limit that stops new work for a space | 5 |
+| `review_queue_cap` | the most items one space may hold in review before it takes no new work (§5.1 rule 7) | 4 for a proof of concept |
 | `lane_budget` | a run's cap before it is reaped: its expected cost × 3 | 3 |
 | `tick` | the tick interval | 10 min; hourly is too slow to re-plan |
 
@@ -464,12 +471,12 @@ maintainer ruled all nine on 2026-10-21; the sections above state the result.
 1. **Lane model** (§6.3): accepted as proposed; three lanes, a bound lane may sit idle, a lane drains before it rebinds, and no session serves two projects.
 2. **Controls** (§6.2): accepted, amended; stop interrupts the session immediately, pause and start act within one tick, and the pipe beats the lane.
 3. **Budget** (§7): accepted as proposed; reserves 0.15 and 0.10, per-window mileage over 6 ticks, the week spent no faster than pro rata, and the last-hour rule.
-4. **Record repository** (§10): accepted, amended; the instance's private record repository, named in configuration, gets one commit per tick, an idle tick amends only an unpushed commit, nothing is force-pushed, and it is pushed on a meaningful event or at least hourly.
+4. **Record repository** (§10): accepted, amended; the instance's private record repository, named in configuration, gets one commit per tick, an idle tick amends only the loop's own unpushed commit, human control commits are rebased over rather than treated as another loop, nothing is force-pushed, and it is pushed on a meaningful event or at least hourly.
 5. **Dashboard writes** (§8.2): accepted as proposed; start, pause, stop and bind per lane and pipe, through the CLI, only on a local-source dashboard with the instance setting on.
 6. **Loop runtime** (§6.4): accepted as proposed; a self-paced loop in one persistent session on the solver's host, a 10-minute tick, restarted by a local scheduler.
 7. **Thresholds** (§9): accepted, amended; liveness is any session activity, stale after 2 ticks without it, a run capped at three times its estimate, held after 2 reaps, and a stall reported after 3 idle ticks with admissible work.
 8. **Proof-of-concept scope** (§6.3): accepted, amended; two executable spaces now, a third once the public-repository instance-data gate exists, three lanes, and a review-queue cap of 4 per space.
-9. **Planning** (§5.3): accepted as proposed; the solver when reachable and reasoning otherwise, repair up to 5 items or one lane, a churn cap of 10, a cold solve every 6 h and at window start, and the lowest-priority runs dropped on a budget fall without stopping a running item.
+9. **Planning** (§5.3): accepted as proposed; the solver when reachable and reasoning otherwise, repair up to 5 items or one lane, a churn cap of 10, a cold solve every 6 h and at window start, a reorder only with a recorded reason, and the lowest-priority runs dropped on a budget fall without stopping a running item.
 
 The thresholds are revisited once the first window reports exist; a change is recorded in the
 instance's own tracker and this page is updated to match.

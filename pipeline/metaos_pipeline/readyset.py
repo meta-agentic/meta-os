@@ -121,8 +121,18 @@ def resolve_repo(item: Item, space_cfg: dict) -> str:
 
 
 def slug(title: str, n: int = 4) -> str:
-    words = re.findall(r"[a-z0-9]+", re.sub(r"^\s*'?(\[[A-Z0-9-]+\]\s*)+", "", title.lower()))
+    words = re.findall(r"[a-z0-9]+", re.sub(r"^\s*'?(\[[A-Z0-9-]+\]\s*)+", "", title).lower())
     return "-".join(words[:n]) or "item"
+
+
+def public_slug(title: str, key_re: re.Pattern, n: int = 5) -> str:
+    """A slug with every key-shaped token dropped, rescanned until stable: dropping one token can
+    join its neighbours into a new key (`fam-spike-s0-01` leaves `fam-01`)."""
+    rx = re.compile(key_re.pattern, key_re.flags | re.I)
+    s = slug(rx.sub(" ", title), 1 << 30)
+    while (t := slug(rx.sub(" ", s), 1 << 30)) != s:
+        s = t
+    return "-".join(s.split("-")[:n])
 
 
 def ready_items(vault: str, cfg: dict, visibility=None, key_re=None) -> list[Item]:
@@ -157,7 +167,7 @@ def ready_items(vault: str, cfg: dict, visibility=None, key_re=None) -> list[Ite
         # (the framework's public-safety rule); the lane prompt says the same.
         it.public = bool(scfg.get("public")) or (visibility is not None and visibility(it.repo) != "private")
         prefix = scfg.get("branch_prefix", it.space.upper() + "/")
-        it.branch = (f"{prefix}{slug((key_re or KEYISH).sub(' ', it.title), 5)}" if it.public
+        it.branch = (f"{prefix}{public_slug(it.title, key_re or KEYISH)}" if it.public
                      else f"{prefix}{it.id}-{slug(it.title)}")
         it.order = (0 if it.committed else 1, it.priority, it.points, it.id)
         out.append(it)

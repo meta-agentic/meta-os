@@ -53,7 +53,10 @@ def visibility_probe(cfg: dict) -> tuple:
         return None, None
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
     import public_repo_gate  # noqa: E402  (scripts/ sits beside pipeline/ in the framework and every instance)
-    gate_cfg = public_repo_gate.load_config(None)
+    try:
+        gate_cfg = public_repo_gate.load_config(None)
+    except public_repo_gate.GateError as exc:
+        raise SystemExit(f"tick: public-repo gate configuration: {exc}") from None
     return functools.lru_cache(maxsize=None)(public_repo_gate.repo_visibility), gate_cfg.key_re
 
 

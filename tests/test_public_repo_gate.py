@@ -190,16 +190,17 @@ class GateTests(unittest.TestCase):
                 self.write_config(gate)
                 self.assertEqual(self.gate("commit-msg", "-C", str(c.dir), str(msg)).returncode, 2)
 
-    def test_commit_msg_honours_the_comment_char_and_scissors(self):
+    def test_hook_scans_comment_looking_lines_that_commit_m_records(self):
+        # `git commit -m` keeps '#' and scissors lines verbatim, so the hook must not skip them.
         c = Clone(self.tmp)
-        c.git("config", "core.commentChar", ";")
-        msg = self.tmp / "msg"
-        msg.write_text(f"fix the parser\n; a comment naming {KEY}\n")
-        self.assertEqual(self.gate("commit-msg", "-C", str(c.dir), str(msg)).returncode, 0)
-        msg.write_text(f"fix the parser\n# not a comment here: {KEY}\n")
-        self.assertEqual(self.gate("commit-msg", "-C", str(c.dir), str(msg)).returncode, 1)
-        msg.write_text(f"fix\n; ------------------------ >8 ------------------------\n+{KEY}\n")
-        self.assertEqual(self.gate("commit-msg", "-C", str(c.dir), str(msg)).returncode, 0)
+        self.assertEqual(self.gate("setup", "-C", str(c.dir)).returncode, 0)
+        (c.dir / "change.txt").write_text("x\n")
+        c.git("add", "change.txt")
+        r = c.git("commit", "-q", "-m", "fix", "-m", f"# see {KEY}", env=self.env)
+        self.assertNotEqual(r.returncode, 0, "a '#' line recorded by -m must be scanned")
+        r = c.git("commit", "-q", "-m", "fix", "-m", f"# ------------------------ >8 ------------------------\n{KEY}",
+                  env=self.env)
+        self.assertNotEqual(r.returncode, 0, "text after a scissors line recorded by -m must be scanned")
 
     @staticmethod
     def commit_no_hook(c: Clone, name: str, text: str, message: str):

@@ -57,7 +57,12 @@ class GateTests(unittest.TestCase):
         self.config.write_text(json.dumps({"publicRepoGate": gate}))
 
     def gate(self, *args: str, config=True) -> subprocess.CompletedProcess:
-        pre = ["--config", str(self.config)] if config else []
+        # Without config means no publicRepoGate object. An empty file stands for it, so the
+        # result never depends on the meta-os.config.json of the repository running the test.
+        bare = self.tmp / "no-gate-config.json"
+        if not config:
+            bare.write_text("{}")
+        pre = ["--config", str(self.config if config else bare)]
         return subprocess.run([sys.executable, str(GATE), *pre, *args],
                               capture_output=True, text=True, env=self.env)
 

@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import yaml  # type: ignore
 
-from metaos_pipeline import controller, readyset, reflect, speculate
+from metaos_pipeline import admission, controller, readyset, reflect, speculate
 from metaos_pipeline.ledger import Ledger, usage_delta
 
 ACTIVE = ("running", "spawning")
@@ -86,6 +86,31 @@ def severity(statuses: list[str]) -> str:
     return worst
 
 
+def planner_order(cfg: dict) -> list[str] | None:
+    """The planner port's order, or None without a planner (the default order then holds).
+
+    The hook only: `planner.order_file` names a JSON document with the planner's `next` and
+    `queue`, written by whatever planner the instance runs. Admission still decides.
+    """
+    pc = cfg.get("planner") or {}
+    if not pc.get("order_file"):
+        return None
+    path = pc["order_file"]
+    if not os.path.isabs(path):
+        path = os.path.join(os.path.dirname(cfg.get("_config_path", ".")), path)
+    with open(path, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    return [str(k) for k in (doc.get("next") or []) + (doc.get("queue") or [])]
+
+
+def emit(text: str, out_path: str | None) -> None:
+    if out_path:
+        with open(out_path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+    else:
+        print(text)
+
+
 # ---------------------------------------------------------------- plan
 def cmd_plan(cfg: dict, led: Ledger, out_path: str | None) -> int:
     reg = cfg.get("regulator") or {}
@@ -126,11 +151,15 @@ def cmd_plan(cfg: dict, led: Ledger, out_path: str | None) -> int:
         if acct and float(acct.get("ts", 0)) >= latest_ts:
             rate_status = severity([acct.get("status", "allowed")])
 
-        # ---- ready set and saturation
-        retries: dict = state.get("retries") or {}
-        max_retries = int(cfg.get("max_retries", 2))
-        ready = [it for it in readyset.ready_items(cfg["vault"], cfg, *visibility_probe(cfg))
-                 if int(retries.get(it.id, 0)) < max_retries]
+        # ---- admission (the ready set) and saturation; a stale index refuses the whole plan
+        try:
+            adm = admission.admit(cfg["vault"], cfg, lanes, state.get("retries") or {}, *visibility_probe(cfg),
+                                  planner_order=planner_order(cfg))
+        except admission.Refused as exc:
+            led.run({"phase": "plan", "tick": tick, "ts": now, "refused": str(exc)})
+            emit(json.dumps({"tick": tick, "ts": now, "refused": str(exc)}, indent=1), out_path)
+            return 2
+        ready = adm.admitted
         active = [l for l in lanes if l.get("status") in ACTIVE]
         lanes_saturated = len(active) >= int(state["N"]) and bool(ready)
 
@@ -221,16 +250,11 @@ def cmd_plan(cfg: dict, led: Ledger, out_path: str | None) -> int:
         led.save_lanes(lanes)
         plan = {"tick": tick, "ts": now, "N": N, "N_old": decision.N_old, "freeze": freeze, "burn_per_hour": round(burn, 3),
                 "setpoint_per_hour": round(target, 3), "rate_status": rate_status, "spent": round(spent, 3),
-                "ready_set": [i.id for i in ready], "paused_spaces": paused, "spawn": spawn, "spec_spawn": spec_spawn,
+                "ready_set": [i.id for i in ready], **adm.as_plan(), "paused_spaces": paused, "spawn": spawn, "spec_spawn": spec_spawn,
                 "check": check, "interrupt": interrupt, "reflection": refl}
         led.run({"phase": "plan", **{k: v for k, v in plan.items() if k not in ("spawn", "spec_spawn", "reflection")},
                  "spawn_ids": [s["lane_id"] for s in spawn], "spec_ids": [s["lane_id"] for s in spec_spawn]})
-    text = json.dumps(plan, indent=1)
-    if out_path:
-        with open(out_path, "w", encoding="utf-8") as fh:
-            fh.write(text)
-    else:
-        print(text)
+    emit(json.dumps(plan, indent=1), out_path)
     return 0
 
 
@@ -369,7 +393,7 @@ def cmd_report(cfg: dict, led: Ledger, out_path: str | None) -> int:
         L.append(f"| {l['lane_id']} | {l['kind']} | {l.get('item') or l.get('decision')} | {l['status']} | `{l.get('branch','')}` | {pr.get('url','') } | {cost:.2f} |")
     L += ["", "## Regulator trace", "", "| tick | N | burn/h | setpoint/h | rate | freeze | reason |", "|---|---|---|---|---|---|---|"]
     for r in runs:
-        if r.get("phase") == "plan":
+        if r.get("phase") == "plan" and not r.get("refused"):
             L.append(f"| {r['tick']} | {r['N_old']}→{r['N']} | {r['burn_per_hour']} | {r['setpoint_per_hour']} | {r['rate_status']} | {r['freeze']} | {r['reflection_reason'] if 'reflection_reason' in r else ''} |")
     L += ["", "## Reflections and escalations", ""]
     for rr in refl:
@@ -386,6 +410,16 @@ def cmd_report(cfg: dict, led: Ledger, out_path: str | None) -> int:
         L += ["## Speculative branches (read first, pick one)", ""]
         for l in spec:
             L.append(f"- {l['decision']} / **{l['branch_key']}** → `{l['branch']}` on {l['repo']} — {l['status']}")
+        L.append("")
+    last = next((r for r in reversed(runs) if r.get("phase") == "plan"), None)
+    if last and (last.get("refused") or last.get("excluded") or last.get("orphans")):
+        L += ["## Not admitted (last plan)", ""]
+        if last.get("refused"):
+            L.append(f"- the plan refused: {last['refused']}")
+        for k, why in (last.get("excluded") or {}).items():
+            L.append(f"- {k}: {why}")
+        for k in last.get("orphans") or []:
+            L.append(f"- {k}: orphan, IN PROGRESS with no lane holding it (for the watchdog)")
         L.append("")
     L += ["## For the human round", ""]
     seen = set()

@@ -1,6 +1,7 @@
 """Unit tests for the deterministic half of the pipeline. Run: python3 -m unittest discover -s pipeline/tests"""
 from __future__ import annotations
 
+import glob
 import json
 import os
 import re
@@ -40,6 +41,16 @@ body of {id_}
 """
 
 
+def graph_index(vault: str) -> None:
+    """Write the vault's dependency index from the items' own `dependencies`, as the vault's generator does."""
+    lines = ["# Dependency graph", ""]
+    for path in sorted(glob.glob(os.path.join(vault, "*", "*", "*.md"))):
+        fm = readyset.front_matter(path)
+        if fm.get("id") and fm.get("kind"):
+            lines += [f"[[{fm['id']}]] -> [[{d}]]" for d in fm.get("dependencies") or []]
+    write(os.path.join(vault, "_graphindex.md"), "\n".join(lines) + "\n")
+
+
 class FakeVault:
     def __init__(self):
         self.dir = tempfile.mkdtemp(prefix="vault-")
@@ -59,6 +70,7 @@ class FakeVault:
         # a space without an active sprint: never ready
         tier, text = item("SPACEB-1", "REFINED", "[X] orphan")
         write(os.path.join(self.dir, "spaceb", tier, "SPACEB-1.md"), text)
+        graph_index(self.dir)
 
     def cleanup(self):
         shutil.rmtree(self.dir, ignore_errors=True)

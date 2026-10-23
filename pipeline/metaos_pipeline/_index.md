@@ -11,6 +11,7 @@ data; the instance's harness runs what the plan emits and feeds the results back
 | File | What |
 |------|------|
 | `__init__.py` | Package docstring: the split between this package and the instance's harness. |
+| `admission.py` | The admission gate: which ready items a lane may start, the first failing rule as each exclusion's reason, orphans, and the planner hook (orders, never widens). |
 | `readyset.py` | Ready-set query over the vault; lane assignment under the WIP cap, the one rule and the fairness cap. |
 | `controller.py` | AIMD regulator on the WIP cap `N`, rate-limit guard, per-lane cap, window budget. |
 | `speculate.py` | The speculation decision rule and the per-tick speculative plan. |

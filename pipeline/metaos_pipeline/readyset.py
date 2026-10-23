@@ -43,6 +43,7 @@ class Item:
     branch: str = ""
     public: bool = False
     order: tuple = field(default_factory=tuple)
+    epic: str = ""
 
 
 def front_matter(path: str) -> dict:
@@ -100,6 +101,7 @@ def load_items(vault: str, spaces: Iterable[str]) -> dict[str, Item]:
                     committed=str(fm["id"]) in committed,
                     path=path,
                     primary_tag=tag.group(1) if tag else "",
+                    epic=str(fm.get("epic") or ""),
                 )
     return items
 
@@ -135,6 +137,22 @@ def public_slug(title: str, key_re: re.Pattern, n: int = 5) -> str:
     return "-".join(s.split("-")[:n])
 
 
+def bind(it: Item, scfg: dict, visibility=None, key_re=None) -> bool:
+    """Resolve the item's repository, visibility, branch and default order; False when no
+    repository resolves (the item has no project to run in)."""
+    it.repo = resolve_repo(it, scfg)
+    if not it.repo:
+        return False
+    # A public repository must not carry tracker ids in branch names, commits or PRs
+    # (the framework's public-safety rule); the lane prompt says the same.
+    it.public = bool(scfg.get("public")) or (visibility is not None and visibility(it.repo) != "private")
+    prefix = scfg.get("branch_prefix", it.space.upper() + "/")
+    it.branch = (f"{prefix}{public_slug(it.title, key_re or KEYISH)}" if it.public
+                 else f"{prefix}{it.id}-{slug(it.title)}")
+    it.order = (0 if it.committed else 1, it.priority, it.points, it.id)
+    return True
+
+
 def ready_items(vault: str, cfg: dict, visibility=None, key_re=None) -> list[Item]:
     """Ordered ready set: committed-to-sprint first, then priority, then points ascending.
 
@@ -159,18 +177,8 @@ def ready_items(vault: str, cfg: dict, visibility=None, key_re=None) -> list[Ite
             continue
         if any(items.get(d, Item(d, "", "", "", "", 0, "", [], [], False, "")).status != "DONE" for d in it.dependencies):
             continue
-        scfg = spaces_cfg.get(it.space, {})
-        it.repo = resolve_repo(it, scfg)
-        if not it.repo:
-            continue
-        # A public repository must not carry tracker ids in branch names, commits or PRs
-        # (the framework's public-safety rule); the lane prompt says the same.
-        it.public = bool(scfg.get("public")) or (visibility is not None and visibility(it.repo) != "private")
-        prefix = scfg.get("branch_prefix", it.space.upper() + "/")
-        it.branch = (f"{prefix}{public_slug(it.title, key_re or KEYISH)}" if it.public
-                     else f"{prefix}{it.id}-{slug(it.title)}")
-        it.order = (0 if it.committed else 1, it.priority, it.points, it.id)
-        out.append(it)
+        if bind(it, spaces_cfg.get(it.space, {}), visibility, key_re):
+            out.append(it)
     out.sort(key=lambda i: i.order)
     return out
 

@@ -1,0 +1,10 @@
+#!/bin/sh
+# meta-os pipeline, post-merge: write one vault_commit event (the new HEAD) to the runner's inbox.
+# A no-op unless METAOS_PIPELINE_INBOX is set. It never fails the git operation.
+[ -n "${METAOS_PIPELINE_INBOX:-}" ] || exit 0
+dir=${METAOS_PIPELINE_DIR:-$(dirname "$0")/..}
+sha=$(git rev-parse HEAD 2>/dev/null) || { echo "pipeline post-merge: no HEAD, no event" >&2; exit 0; }
+PYTHONPATH="$dir${PYTHONPATH:+:$PYTHONPATH}" python3 -m metaos_pipeline.events emit vault_commit \
+  --inbox "$METAOS_PIPELINE_INBOX" --source post-merge --payload "{\"sha\": \"$sha\"}" >/dev/null \
+  || echo "pipeline post-merge: event not written" >&2
+exit 0

@@ -61,6 +61,14 @@ class InboxFormat(Base):
         self.assertEqual([e["path"] for e in events.list_events(self.inbox)], [p])
         self.assertEqual([n for n in os.listdir(self.inbox) if n.startswith(".tmp") and "vault" in n], [])
 
+    def test_event_and_marker_files_are_owner_only(self):
+        p = events.write_event(self.inbox, "vault_commit", "t")
+        self.assertEqual(os.stat(p).st_mode & 0o077, 0)
+        events.schedule_window_reset(self.inbox, "five_hour", 1800000000, "a", spawn=lambda argv: None)
+        mdir = os.path.join(self.inbox, ".scheduled")
+        marker = os.path.join(mdir, os.listdir(mdir)[0])
+        self.assertEqual(os.stat(marker).st_mode & 0o077, 0)
+
     def test_oldest_first_and_kinds(self):
         events.write_event(self.inbox, "remote_change", "t", now=2_000_000_000)
         events.write_event(self.inbox, "vault_commit", "t", now=1_000_000_000)

@@ -53,7 +53,7 @@ def write_event(inbox: str, kind: str, source: str, payload: dict | None = None,
     os.makedirs(inbox, exist_ok=True)
     path = os.path.join(inbox, eid + ".json")
     tmp = os.path.join(inbox, ".tmp-" + eid + ".json")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(json.dumps(body, sort_keys=True) + "\n")
@@ -116,7 +116,7 @@ def schedule_window_reset(inbox: str, window: str, resets_at: int, source: str,
     safe = re.sub(r"[^A-Za-z0-9_]", "_", window)[:40] or "unknown"
     marker = os.path.join(mdir, f"window-reset-{safe}-{int(resets_at)}")
     try:
-        os.close(os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
+        os.close(os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
     except FileExistsError:
         return False
     payload = json.dumps({"window": window, "resets_at": int(resets_at)})

@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """meta-os autonomous pipeline — one tick.
 
-    tick.py --config CFG --state DIR plan   [--out plan.json]
-    tick.py --config CFG --state DIR record --results results.json
-    tick.py --config CFG --state DIR report [--out report.md]
+    tick.py --config CFG [--state DIR] [--metaos-config FILE] plan   [--out plan.json]
+    tick.py --config CFG [--state DIR] [--metaos-config FILE] record --results results.json
+    tick.py --config CFG [--state DIR] [--metaos-config FILE] report [--out report.md]
+
+The record goes to the clone of `swarm.record_repository` when the estate config
+(`meta-os.config.json`, found above CFG or named by --metaos-config) sets it, and to the plain
+directory --state otherwise; the run line on stderr says which (`pipeline/record.md`).
 
 `plan` reads the vault and the ledger, runs the regulator and the reflection, and emits what
 the harness must do: which lanes to start (with their prompts), which sessions to check, which
@@ -28,6 +32,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import yaml  # type: ignore
 
 from metaos_pipeline import admission, controller, readyset, reflect, speculate
+from metaos_pipeline import ledger as record
 from metaos_pipeline.ledger import Ledger, usage_delta
 
 ACTIVE = ("running", "spawning")
@@ -37,10 +42,47 @@ def load_config(path: str) -> dict:
     with open(path, encoding="utf-8") as fh:
         cfg = yaml.safe_load(fh) or {}
     base = os.path.dirname(os.path.abspath(path))
-    for key in ("vault", "backlog_cli", "model_path"):
+    for key in ("vault", "backlog_cli", "model_path", "metaos_config"):
         if cfg.get(key) and not os.path.isabs(cfg[key]):
             cfg[key] = os.path.normpath(os.path.join(base, cfg[key]))
     return cfg
+
+
+def find_metaos_config(cfg: dict, explicit: str | None) -> str | None:
+    """The estate config: --metaos-config, else the pipeline config's `metaos_config`, else the nearest above it."""
+    if explicit or cfg.get("metaos_config"):
+        return os.path.abspath(explicit or cfg["metaos_config"])
+    d = os.path.dirname(cfg["_config_path"])
+    while True:
+        cand = os.path.join(d, "meta-os.config.json")
+        if os.path.isfile(cand):
+            return cand
+        if os.path.dirname(d) == d:
+            return None
+        d = os.path.dirname(d)
+
+
+def open_ledger(cfg: dict, state_dir: str | None, metaos_config: str | None) -> Ledger:
+    """The ledger over the record repository's clone when `swarm.record_repository` is set, else over --state."""
+    path = find_metaos_config(cfg, metaos_config)
+    estate: dict = {}
+    if path:
+        with open(path, encoding="utf-8") as fh:
+            estate = json.load(fh)
+    rr = (estate.get("swarm") or {}).get("record_repository") or {}
+    if not rr.get("url"):
+        if not state_dir:
+            raise SystemExit("tick: no record: swarm.record_repository is unset and --state was not given")
+        return Ledger(state_dir)
+    if not rr.get("path"):
+        raise SystemExit("tick: swarm.record_repository.url is set without its .path")
+    clone = rr["path"]
+    for name, value in (estate.get("vars") or {}).items():
+        clone = clone.replace("${" + name + "}", str(value))
+    clone = os.path.normpath(os.path.join(os.path.dirname(path), clone))
+    record.check_not_nested(clone, os.path.dirname(cfg["_config_path"]),
+                            bool((cfg.get("record_repository") or {}).get("allow_nested")))
+    return Ledger(clone, remote=rr["url"])
 
 
 def visibility_probe(cfg: dict) -> tuple:
@@ -117,7 +159,7 @@ def cmd_plan(cfg: dict, led: Ledger, out_path: str | None) -> int:
     defaults = {"N": int(reg.get("N0", 3)), "tick": 0, "paused": [], "spent": 0.0,
                 "calibration": dict(cfg.get("calibration") or {}),
                 "window_start": time.time(), "last_tick_ts": None}
-    with led.locked():
+    with led.locked("plan"):
         state = led.state(defaults)
         lanes = led.lanes()
         now = time.time()
@@ -227,9 +269,10 @@ def cmd_plan(cfg: dict, led: Ledger, out_path: str | None) -> int:
                                 pr_title_prefix=("" if it.public else f"{it.id}: "))
                 lane = {"lane_id": lane_id, "kind": "work", "item": it.id, "space": it.space, "repo": it.repo,
                         "branch": it.branch, "primary_tag": it.primary_tag, "status": "spawning",
-                        "planned_tick": tick, "planned_ts": now, "usage": [], "points": it.points}
+                        "planned_tick": tick, "planned_ts": now, "usage": [], "points": it.points,
+                        "item_ref": record.item_ref(cfg["vault"], it.path)}
                 lanes.append(lane)
-                spawn.append({**{k: lane[k] for k in ("lane_id", "kind", "item", "space", "repo", "branch")},
+                spawn.append({**{k: lane[k] for k in ("lane_id", "kind", "item", "space", "repo", "branch", "item_ref")},
                               "title": it.title, "prompt": prompt})
 
         # ---- reflection
@@ -254,6 +297,9 @@ def cmd_plan(cfg: dict, led: Ledger, out_path: str | None) -> int:
                 "check": check, "interrupt": interrupt, "reflection": refl}
         led.run({"phase": "plan", **{k: v for k, v in plan.items() if k not in ("spawn", "spec_spawn", "reflection")},
                  "spawn_ids": [s["lane_id"] for s in spawn], "spec_ids": [s["lane_id"] for s in spec_spawn]})
+        if led.remote:  # the record keeps the plan without its prompts: an item is named by item_ref
+            led.write_pass_file("plan", tick, now, {**plan, "spawn": [{k: v for k, v in s.items() if k != "prompt"} for s in spawn],
+                                                    "spec_spawn": [{k: v for k, v in s.items() if k != "prompt"} for s in spec_spawn]})
     emit(json.dumps(plan, indent=1), out_path)
     return 0
 
@@ -301,7 +347,7 @@ def cmd_record(cfg: dict, led: Ledger, results_path: str) -> int:
         res = json.load(fh)
     now = time.time()
     transitions: list[str] = []
-    with led.locked():
+    with led.locked("record"):
         state = led.state({"N": 1, "tick": 0, "spent": 0.0})
         lanes = led.lanes()
         by_id = {l["lane_id"]: l for l in lanes}
@@ -367,6 +413,8 @@ def cmd_record(cfg: dict, led: Ledger, results_path: str) -> int:
         state.update({"last_tick_ts": now, "spent": spent})
         led.save_lanes(lanes)
         led.save_state(state)
+        if led.remote:
+            led.write_pass_file("results", int(state.get("tick") or 0), now, res)
         led.run({"phase": "record", "tick": state.get("tick"), "spent": round(spent, 3),
                  "transitions": transitions, "n_checks": len(res.get("checks") or []),
                  "n_spawned_ok": len([s for s in (res.get("spawned") or []) if s.get("ok")])})
@@ -444,7 +492,8 @@ def cmd_report(cfg: dict, led: Ledger, out_path: str | None) -> int:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", required=True)
-    ap.add_argument("--state", required=True)
+    ap.add_argument("--state", help="the plain record directory, used when swarm.record_repository is unset")
+    ap.add_argument("--metaos-config", help="the estate config (default: the nearest meta-os.config.json above --config)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("plan"); p.add_argument("--out")
     r = sub.add_parser("record"); r.add_argument("--results", required=True)
@@ -452,12 +501,16 @@ def main(argv: list[str] | None = None) -> int:
     a = ap.parse_args(argv)
     cfg = load_config(a.config)
     cfg["_config_path"] = os.path.abspath(a.config)
-    led = Ledger(a.state)
-    if a.cmd == "plan":
-        return cmd_plan(cfg, led, a.out)
-    if a.cmd == "record":
-        return cmd_record(cfg, led, a.results)
-    return cmd_report(cfg, led, a.out)
+    try:
+        led = open_ledger(cfg, a.state, a.metaos_config)
+        print(f"tick {a.cmd}: record in {led.describe()}", file=sys.stderr)
+        if a.cmd == "plan":
+            return led.replay(lambda: cmd_plan(cfg, led, a.out))
+        if a.cmd == "record":
+            return led.replay(lambda: cmd_record(cfg, led, a.results))
+        return cmd_report(cfg, led, a.out)
+    except record.LedgerError as exc:
+        raise SystemExit(f"tick: stopped: {exc}") from None
 
 
 if __name__ == "__main__":

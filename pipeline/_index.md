@@ -9,7 +9,7 @@ autonomy (regulator, reflection, speculation) [[systems/pipeline/control-spike]]
 
 This folder is **mechanism, not policy** — instances mount it rather than copy it, so it
 must run unchanged in every one of them: it holds no repository names, no budgets, no
-prompts. An instance supplies a config file and a state directory (with `visibility_probe: true`
+prompts. An instance supplies a config file and a record: the private repository `swarm.record_repository` names, or a plain state directory when that key is unset ([[pipeline/record]]; with `visibility_probe: true`
 there, each run's repository is probed through [[scripts/_index|scripts/public_repo_gate.py]]
 and a repository not proven private gets a branch name without the item id or any key its title cites, the public-repository note, and an empty `{pr_title_prefix}` where a private one gets `<id>: `); a harness in the
 instance executes what `tick.py plan` emits and feeds the outcome back through
@@ -31,6 +31,9 @@ instance executes what `tick.py plan` emits and feeds the outcome back through
 | `metaos_pipeline/remote_watch.py` | the one poll: conditional (ETag) GitHub requests; a change writes one `remote_change` event |
 | `hooks/post-commit`, `hooks/post-merge` | in the record clone: one `vault_commit` event per new HEAD when `METAOS_PIPELINE_INBOX` is set |
 | `tests/test_pipeline.py` | `python3 -m unittest discover -s pipeline/tests` |
+| `metaos_pipeline/ledger.py` | atomic state, materialised lanes, append-only events / runs / reflections, a directory lock; over the record repository's clone, fetch before every phase and one commit per phase that changed something, pushed at once |
+| `record.md` | the record's read contract: every file, its shape, its writer, its `schema` version |
+| `tests/test_pipeline.py`, `tests/test_record.py` | `python3 -m unittest discover -s pipeline/tests` |
 | `metaos_pipeline/`, `tests/` | each has its own index — [[pipeline/metaos_pipeline/_index\|metaos_pipeline/]] · [[pipeline/tests/_index\|tests/]] |
 
 ## Contract with the harness

@@ -21,4 +21,4 @@ observe steps and remotes and only write events to the runner's inbox.
 | `events.py` | The runner's inbox: the event file format, its one atomic writer, `list_events`, the `emit` CLI, the one-shot window reset. |
 | `step_wrap.py` | Runs one step; writes `rate_limit` and `step_exit` events from what it reports, never changing its exit code. |
 | `remote_watch.py` | The one poll: conditional (ETag) GitHub requests; a changed answer writes one `remote_change` event. |
-| `ledger.py` | Atomic state, materialised lanes, append-only events / runs / reflections, a directory lock. |
+| `ledger.py` | The record: atomic state, materialised lanes, append-only events / runs / reflections, a directory lock, `schema` versions; over the record repository's clone, fetch-before-write, one commit per phase that changed something and a replay on a rejected push. |

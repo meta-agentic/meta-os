@@ -82,7 +82,7 @@ optional; the file may be omitted entirely (defaults apply). Shape:
 | `max_stale_reaps` | reaps of one item before it is held for a human | 2 |
 | `stall_after_ticks` | idle ticks with admissible work before a stall is reported | 3 |
 | `executable_spaces` | the spaces whose items the pipeline may start | `[]` (none) |
-| `record_repository.url`, `.path` | the private repository the loop writes, and its local clone | none |
+| `record_repository.url`, `.path` | the private repository the loop writes, and its local clone ([[pipeline/record]]) | none: the record stays in the plain directory `tick.py --state` names |
 | `planner.adapter` | `command` or `reasoning` | `reasoning` |
 | `planner.command` | the planner command and its arguments | none |
 | `planner.repair_max_items`, `.churn_cap` | repair when a change touches at most this many items or one lane; solve cold past this edit distance | 5, 10 |

@@ -14,12 +14,18 @@ show (`rate_limit_info: {status, resetsAt, rateLimitType}`, reset in epoch secon
 depth of the line, under either spelling, and ignores anything else.
 
 A producer failure is reported on stderr and never changes the step's exit code.
+
+The step runs in its own process group. SIGTERM, SIGINT or SIGHUP to the wrapper (the
+runner reaping a silent step) terminates that group, kills it after `GRACE_SECONDS`, writes
+`step_exit` with the `signal` (and `killed` if SIGKILL was needed), and exits 128 + signal.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -33,6 +39,8 @@ INFO_KEYS = ("rate_limit_info", "rateLimitInfo")
 RESET_KEYS = ("resetsAt", "resets_at", "resetAt", "reset_at")
 WINDOW_KEYS = ("rateLimitType", "rate_limit_type", "window")
 RAW_MAX = 4000
+GRACE_SECONDS = 5.0
+FORWARDED = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
 
 
 def _find_info(obj, depth: int = 0):
@@ -93,6 +101,22 @@ class Wrapper:
         self.source = f"step_wrap:{run_id}"
         self.seen: set[tuple] = set()
         self.pr_url = self.branch = None
+        self.proc: subprocess.Popen | None = None
+        self.signum: int | None = None
+        self.killed = False
+
+    def _terminate(self, signum, _frame) -> None:
+        self.signum = signum
+        if self.proc is None or self.proc.poll() is not None:
+            return
+        try:
+            os.killpg(self.proc.pid, signal.SIGTERM)
+            self.proc.wait(timeout=GRACE_SECONDS)
+        except subprocess.TimeoutExpired:
+            self.killed = True
+            os.killpg(self.proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
 
     def _safe(self, what: str, fn, *a, **kw):
         try:
@@ -123,8 +147,9 @@ class Wrapper:
         out = None
         try:
             out = open(self.log, "ab") if self.log else None
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                    stderr=subprocess.STDOUT if out else None)
+            proc = self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, start_new_session=True,
+                                                stderr=subprocess.STDOUT if out else None)
+            previous = {s: signal.signal(s, self._terminate) for s in FORWARDED}
         except OSError as exc:
             print(f"step_wrap: cannot start step: {exc}", file=sys.stderr)
             code = 127
@@ -136,13 +161,16 @@ class Wrapper:
                     sink.flush()
                     self._safe("output parse", self.observe, raw.decode("utf-8", "replace"))
             rc = proc.wait()
-            code = 128 - rc if rc < 0 else rc
+            for s, h in previous.items():
+                signal.signal(s, h)
+            code = 128 + self.signum if self.signum else (128 - rc if rc < 0 else rc)
         finally:
             if out:
                 out.close()
         self._safe("step_exit event", events.write_event, self.inbox, "step_exit", self.source, {
             "run_id": self.run_id, "exit_code": code, "log": self.log,
-            "started": started, "ended": time.time(), "pr_url": self.pr_url, "outcome_branch": self.branch})
+            "started": started, "ended": time.time(), "pr_url": self.pr_url, "outcome_branch": self.branch,
+            "signal": signal.Signals(self.signum).name if self.signum else None, "killed": self.killed})
         return code
 
 

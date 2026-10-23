@@ -23,9 +23,9 @@ pass that consumed it has committed.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
+import re
 import secrets
 import subprocess
 import sys
@@ -86,8 +86,8 @@ def list_events(inbox: str) -> list[dict]:
 
 
 def _detached(argv: list[str]) -> None:
-    env = {**os.environ, "PYTHONPATH": PKG_ROOT + os.pathsep + os.environ.get("PYTHONPATH", "")}
-    subprocess.Popen(argv, start_new_session=True, stdin=subprocess.DEVNULL,
+    env = {**os.environ, "PYTHONPATH": PKG_ROOT}  # importable whatever the caller's cwd and env
+    subprocess.Popen(argv, start_new_session=True, stdin=subprocess.DEVNULL, cwd=PKG_ROOT,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env, close_fds=True)
 
 
@@ -95,14 +95,26 @@ def schedule_window_reset(inbox: str, window: str, resets_at: int, source: str,
                           spawn: Callable[[list[str]], None] = _detached) -> bool:
     """Arrange ONE `window_reset` event at `resets_at` (epoch seconds) for this window.
 
-    Idempotent per (window, resets_at): a marker in `<inbox>/.scheduled/` is created with
-    O_EXCL, so a second step hitting the same limit schedules nothing. Returns True if this
-    call scheduled it. The one-shot is a detached process that sleeps, writes, and exits.
+    Idempotent per (window, resets_at): the marker `<inbox>/.scheduled/window-reset-<window>-
+    <resets_at>` is created with O_EXCL, so a second step hitting the same limit schedules
+    nothing. Each call prunes the markers whose reset has passed, and a reset already past is
+    not scheduled. Returns True if this call scheduled it. The one-shot is a detached process
+    that sleeps, writes, and exits.
     """
-    key = hashlib.sha256(f"{window}|{int(resets_at)}".encode()).hexdigest()[:16]
+    now = time.time()
+    if resets_at <= now:
+        return False
     mdir = os.path.join(inbox, ".scheduled")
     os.makedirs(mdir, exist_ok=True)
-    marker = os.path.join(mdir, f"window-reset-{key}")
+    for name in os.listdir(mdir):
+        m = re.match(r"^window-reset-.*-(\d+)$", name)
+        if m and int(m.group(1)) < now:
+            try:
+                os.unlink(os.path.join(mdir, name))
+            except FileNotFoundError:
+                pass
+    safe = re.sub(r"[^A-Za-z0-9_]", "_", window)[:40] or "unknown"
+    marker = os.path.join(mdir, f"window-reset-{safe}-{int(resets_at)}")
     try:
         os.close(os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
     except FileExistsError:

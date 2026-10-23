@@ -9,7 +9,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import signal
 import threading
+import time
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -21,7 +23,7 @@ from metaos_pipeline import events, remote_watch, step_wrap  # noqa: E402
 NAME_RE = re.compile(r"^\d{8}T\d{6}\.\d{6}Z-[a-z_]+-[0-9a-f]{8}\.json$")
 ENV = {**os.environ, "PYTHONPATH": PIPELINE}
 RATE_LINE = json.dumps({"type": "rate_limit_event", "rate_limit_info": {
-    "status": "rejected", "resetsAt": 1791946800, "rateLimitType": "seven_day"}})
+    "status": "rejected", "resetsAt": 1893456000, "rateLimitType": "seven_day"}})
 
 
 def py(*args: str) -> list[str]:
@@ -91,8 +93,23 @@ class WindowReset(Base):
         def boom(argv):
             raise OSError("no fork")
         with self.assertRaises(OSError):
-            events.schedule_window_reset(self.inbox, "w", 1, "a", spawn=boom)
-        self.assertTrue(events.schedule_window_reset(self.inbox, "w", 1, "a", spawn=lambda argv: None))
+            events.schedule_window_reset(self.inbox, "w", 1800000000, "a", spawn=boom)
+        self.assertTrue(events.schedule_window_reset(self.inbox, "w", 1800000000, "a", spawn=lambda argv: None))
+
+    def test_past_markers_are_pruned_and_past_resets_not_scheduled(self):
+        mdir = os.path.join(self.inbox, ".scheduled")
+        os.makedirs(mdir)
+        open(os.path.join(mdir, "window-reset-five_hour-1000"), "w").close()
+        self.assertFalse(events.schedule_window_reset(self.inbox, "five_hour", 1000, "a", spawn=print))
+        events.schedule_window_reset(self.inbox, "seven/day", 1800000000, "a", spawn=lambda argv: None)
+        self.assertEqual(os.listdir(mdir), ["window-reset-seven_day-1800000000"])
+
+    def test_real_detached_one_shot_writes_the_event(self):
+        self.assertTrue(events.schedule_window_reset(self.inbox, "five_hour", int(time.time()) + 1, "e2e"))
+        deadline = time.time() + 8
+        while time.time() < deadline and not events.list_events(self.inbox):
+            time.sleep(0.2)
+        self.assertEqual(self.only("window_reset")["source"], "e2e")
 
     def test_the_one_shot_writes_one_window_reset(self):
         r = subprocess.run([sys.executable, "-m", "metaos_pipeline.events", "emit", "window_reset",
@@ -129,7 +146,7 @@ class StepWrapper(Base):
             events.schedule_window_reset = orig
         self.assertEqual(rc, 0)
         p = self.only("rate_limit")["payload"]
-        self.assertEqual((p["status"], p["window"], p["resets_at"]), ("rejected", "seven_day", 1791946800))
+        self.assertEqual((p["status"], p["window"], p["resets_at"]), ("rejected", "seven_day", 1893456000))
         self.assertEqual(json.loads(p["raw"])["type"], "rate_limit_event")
         self.assertEqual(len(scheduled), 1)
         self.only("step_exit")
@@ -151,6 +168,20 @@ class StepWrapper(Base):
         self.assertEqual(r.returncode, 5)
         self.assertIn("rate_limit", r.stdout)
         self.assertIn("step_exit event failed", r.stderr)
+
+
+    def test_killed_wrapper_terminates_the_step_and_writes_step_exit(self):
+        w = subprocess.Popen([sys.executable, "-m", "metaos_pipeline.step_wrap", "--inbox", self.inbox,
+                              "--run-id", "r", "--", *py("import os, time; print(os.getpid(), flush=True); time.sleep(60)")],
+                             env=ENV, stdout=subprocess.PIPE, text=True)
+        child = int(w.stdout.readline())
+        w.send_signal(signal.SIGTERM)
+        self.assertEqual(w.wait(timeout=10), 128 + signal.SIGTERM)
+        w.stdout.close()
+        with self.assertRaises(ProcessLookupError):
+            os.kill(child, 0)
+        p = self.only("step_exit")["payload"]
+        self.assertEqual((p["signal"], p["killed"], p["exit_code"]), ("SIGTERM", False, 128 + signal.SIGTERM))
 
 
 class VaultHook(Base):

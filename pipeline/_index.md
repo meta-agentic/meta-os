@@ -25,6 +25,10 @@ instance executes what `tick.py plan` emits and feeds the outcome back through
 | `metaos_pipeline/ledger.py` | atomic state, materialised lanes, append-only events / runs / reflections, a directory lock |
 | `sentinel.py` | the watcher outside every session (a launchd `WatchPaths` job, never an interval): `inbox` mode notifies once per event the runner left unconsumed for `--stall-minutes`; `progress` mode, armed by a marker file, notifies once per silence of the watched paths (a stat walk bounded by `--max-depth`, never entering dot-dirs or build trees). The notifier is the instance's argv (`--notify-cmd`) |
 | `preflight.py` | refuses an unattended start when any step's command template could ask for approval under the session's permission settings (deny, ask, no allow rule, compound or `cd`); passes under `bypassPermissions` with a caveat |
+| `metaos_pipeline/events.py` | the runner's inbox: the event file format, its one atomic writer, `list_events`, the `emit` CLI, the one-shot window reset |
+| `metaos_pipeline/step_wrap.py` | runs one step; writes `rate_limit` and `step_exit` events from what it reports |
+| `metaos_pipeline/remote_watch.py` | the one poll: conditional (ETag) GitHub requests; a change writes one `remote_change` event |
+| `hooks/post-commit`, `hooks/post-merge` | in the record clone: one `vault_commit` event per new HEAD when `METAOS_PIPELINE_INBOX` is set |
 | `tests/test_pipeline.py` | `python3 -m unittest discover -s pipeline/tests` |
 | `metaos_pipeline/`, `tests/` | each has its own index — [[pipeline/metaos_pipeline/_index\|metaos_pipeline/]] · [[pipeline/tests/_index\|tests/]] |
 
@@ -48,6 +52,29 @@ transitions to `IN PROGRESS` when a lane starts and to `IN REVIEW` when a lane e
 PR, through the instance's backlog CLI (which receives the vault path in `METAOS_VAULT`),
 then commits the vault with a message that names every transition, lane, session and
 branch.
+
+## Events (the runner's inbox)
+
+The runner has no cadence: it blocks on an inbox directory and runs one pass per event.
+Producers only write there; none reads the record, takes the lease or starts work.
+
+- **File:** `<UTC yyyymmddTHHMMSS.ffffffZ>-<kind>-<8 hex>.json`, so names sort by time. Written
+  to `.tmp-<name>` and renamed; a name starting with `.` is never an event.
+- **Body:** `{schema: 1, id, kind, at, source, payload}`.
+- **Kinds:** `step_exit`, `rate_limit`, `window_reset`, `vault_commit`, `remote_change`;
+  `control` and `stall` are the runner's own.
+
+```bash
+python3 -m metaos_pipeline.events emit <kind> --inbox DIR --source S [--payload JSON]
+python3 -m metaos_pipeline.step_wrap --inbox DIR --run-id R [--log FILE] -- <cmd...>
+python3 -m metaos_pipeline.remote_watch --inbox DIR --targets FILE [--poll-seconds 60] [--state FILE] [--once]
+```
+
+Run them from `pipeline/` or with it on `PYTHONPATH`. The targets file is the instance's (a
+JSON list of `owner/repo@branch` and `owner/repo#n`). A reported reset time schedules one
+detached one-shot that writes `window_reset` at that time, once per (window, reset time).
+
+Installing the hooks in the record clone: [[pipeline/hooks/_index|hooks/]].
 
 ## Invariants
 

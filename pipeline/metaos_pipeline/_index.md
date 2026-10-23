@@ -7,6 +7,8 @@ tags: [os, pipeline, automation]
 The library behind `tick.py` ([[pipeline/_index|pipeline/]]): everything the pipeline
 decides, and nothing it executes. No module here talks to a session API or holds instance
 data; the instance's harness runs what the plan emits and feeds the results back.
+The exception is the event producers (`events.py`, `step_wrap.py`, `remote_watch.py`): they
+observe steps and remotes and only write events to the runner's inbox.
 
 | File | What |
 |------|------|
@@ -15,4 +17,7 @@ data; the instance's harness runs what the plan emits and feeds the results back
 | `controller.py` | AIMD regulator on the WIP cap `N`, rate-limit guard, per-lane cap, window budget. |
 | `speculate.py` | The speculation decision rule and the per-tick speculative plan. |
 | `reflect.py` | Predicted (queueing model) vs measured, attribution rules, escalations, the reflection record. |
+| `events.py` | The runner's inbox: the event file format, its one atomic writer, `list_events`, the `emit` CLI, the one-shot window reset. |
+| `step_wrap.py` | Runs one step; writes `rate_limit` and `step_exit` events from what it reports, never changing its exit code. |
+| `remote_watch.py` | The one poll: conditional (ETag) GitHub requests; a changed answer writes one `remote_change` event. |
 | `ledger.py` | Atomic state, materialised lanes, append-only events / runs / reflections, a directory lock. |

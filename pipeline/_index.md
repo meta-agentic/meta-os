@@ -18,6 +18,7 @@ instance executes what `tick.py plan` emits and feeds the outcome back through
 | File | What |
 |---|---|
 | `tick.py` | CLI: `plan` (ready set → regulator → assignment → speculation → reflection), `record` (harness results → ledger → item transitions → vault commit), `report` (the human's morning page) |
+| `metaos_pipeline/admission.py` | the admission gate: executable space, status, blockers from the vault's dependency index (refuses a stale one), lane holds and retries, holding labels and parked epics; a reason for every exclusion, orphans for the watchdog, the planner's order among the admitted |
 | `metaos_pipeline/readyset.py` | ready-set query over the vault; the one rule as a `(space, repo, primary tag)` heuristic; fairness cap |
 | `metaos_pipeline/controller.py` | AIMD regulator on the WIP cap `N`, rate-limit guard, per-lane cap, window budget |
 | `metaos_pipeline/speculate.py` | the speculation decision rule and the per-tick speculative plan |
@@ -34,7 +35,9 @@ instance executes what `tick.py plan` emits and feeds the outcome back through
 
 ## Contract with the harness
 
-`plan` writes a JSON document: `spawn[]` (work lanes: item, repo, branch, prompt),
+`plan` writes a JSON document: `spawn[]` (work lanes: item, repo, branch, prompt), `admitted[]`, `excluded{id: reason}`, `orphans[]` and
+`planner_ignored{id: reason}` from the admission gate (a stale dependency index makes `plan`
+exit 2 with `refused` and nothing else),
 `spec_spawn[]` (speculative lanes: decision, branch key, outcome branch, prompt), `check[]`
 (running sessions to poll), `interrupt[]` (lanes over their cap), `N`, `freeze`, gauges and
 the reflection record. The harness starts one headless session per spawn entry, polls the

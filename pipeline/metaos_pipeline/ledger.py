@@ -167,16 +167,36 @@ class _Clone:
         has_head = self._run("rev-parse", "--verify", "-q", "HEAD").returncode == 0
         if self._run("rev-parse", "--verify", "-q", remote).returncode != 0:
             if has_head:
-                raise StaleClone(f"{self.path} has commits its remote branch {remote} does not; refusing to write")
+                self._push_pending(remote, 0)
             return  # an empty record repository: the first phase makes its first commit
         if not has_head:
             self._run("reset", "-q", "--hard", remote)
             return
         ahead, behind = (int(x) for x in self._run("rev-list", "--left-right", "--count", f"HEAD...{remote}").stdout.split())
+        if ahead and behind:
+            raise StaleClone(f"{self.path} holds {ahead} commit(s) not on {remote}, which holds {behind} not here: "
+                             "a pending pass cannot be replayed without its phase, so a human resolves it")
         if ahead:
-            raise StaleClone(f"{self.path} holds {ahead} commit(s) not on {remote}; refusing to write until they are resolved")
+            self._push_pending(remote, ahead)
         if behind and self._run("merge", "-q", "--ff-only", remote).returncode != 0:
             raise StaleClone(f"cannot fast-forward {self.path} to {remote}; refusing to write")
+
+    def _push(self) -> None:
+        p = self._run("push", "-q", "origin", f"HEAD:refs/heads/{self.branch()}")
+        if p.returncode != 0:
+            if any(s in p.stderr for s in ("non-fast-forward", "fetch first", "rejected")):
+                raise PushRejected(p.stderr.strip()[-300:])
+            raise LedgerError(f"record push failed; the commit stays local and the next phase pushes it: {p.stderr.strip()[-300:]}")
+
+    def _push_pending(self, remote: str, ahead: int) -> None:
+        """An earlier push failed and the remote has not moved since: push those commits first (never forced)."""
+        try:
+            self._push()
+        except PushRejected:
+            raise StaleClone(f"{self.path} holds {ahead or 'its'} commit(s) not on {remote}, and the remote moved before "
+                             "they were pushed: a pending pass cannot be replayed without its phase, so a human resolves it") from None
+        except LedgerError as exc:
+            raise LedgerError(f"record push pending, retried and failed again; the next run retries: {exc}") from None
 
     def commit_and_push(self, message: str) -> str | None:
         self._run("add", "-A")
@@ -185,11 +205,7 @@ class _Clone:
         c = self._run("commit", "-q", "-m", message)
         if c.returncode != 0:
             raise LedgerError(f"record commit failed: {(c.stdout + c.stderr).strip()[-300:]}")
-        p = self._run("push", "-q", "origin", f"HEAD:refs/heads/{self.branch()}")
-        if p.returncode != 0:
-            if any(s in p.stderr for s in ("non-fast-forward", "fetch first", "rejected")):
-                raise PushRejected(p.stderr.strip()[-300:])
-            raise LedgerError(f"record push failed; the commit stays local and the next phase refuses: {p.stderr.strip()[-300:]}")
+        self._push()
         return self._run("rev-parse", "HEAD").stdout.strip()
 
     def discard_uncommitted(self) -> None:

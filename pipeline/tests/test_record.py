@@ -116,7 +116,7 @@ class GitLedgerTests(unittest.TestCase):
         with a.locked("plan"):
             a.event("moved")
         ran = []
-        with self.assertRaisesRegex(record.StaleClone, "not on origin/main"):
+        with self.assertRaisesRegex(record.StaleClone, "holds 1 commit.*holds 1 not here.*a human resolves it"):
             with b.locked("plan"):
                 ran.append(1)
         self.assertEqual(ran, [])
@@ -127,6 +127,18 @@ class GitLedgerTests(unittest.TestCase):
             with a.locked("plan"):
                 ran.append(2)
         self.assertEqual(ran, [])
+
+    def test_a_failed_push_is_pushed_by_the_next_phase(self):
+        a = Ledger(self.repo.clone("a"), remote=self.repo.url)
+        moved = os.path.join(self.repo.root, "away.git")
+        with self.assertRaisesRegex(record.LedgerError, "record push failed"):
+            with a.locked("plan"):
+                a.save_state({"tick": 4})
+                os.rename(self.repo.url, moved)  # the remote is unreachable when the phase pushes
+        os.rename(moved, self.repo.url)
+        with a.locked("plan"):  # no StaleClone: the pending pass is pushed first, then the phase runs
+            a.save_state({"tick": 5})
+        self.assertEqual(self.repo.log()[:2], ["pass 5 plan: lanes changed: none", "pass 4 plan: lanes changed: none"])
 
     def test_unknown_schema_stops_with_its_reason(self):
         d = tempfile.mkdtemp()

@@ -10,6 +10,7 @@ Unit and end-to-end tests for [[pipeline/metaos_pipeline/_index|metaos_pipeline/
 | File | What |
 |------|------|
 | `test_pipeline.py` | Ready set and assignment (the one rule, fairness, public-repo branch names), the AIMD regulator, speculation, the ledger, the backlog-CLI contract, and a `plan → record → report` round trip. |
+| `test_sentinel_preflight.py` | The sentinel's two modes with sub-second stalls (a stall notifies once, a consumed event or a changing tree never, `.tmp` files are not events) and the pre-flight's allow, ask, deny, unmatched, compound and bypass cases. |
 
 ## Running it
 

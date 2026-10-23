@@ -23,7 +23,7 @@ instance executes what `tick.py plan` emits and feeds the outcome back through
 | `metaos_pipeline/speculate.py` | the speculation decision rule and the per-tick speculative plan |
 | `metaos_pipeline/reflect.py` | predicted (queueing model) vs measured, attribution rules, escalations, the reflection record |
 | `metaos_pipeline/ledger.py` | atomic state, materialised lanes, append-only events / runs / reflections, a directory lock |
-| `sentinel.py` | the watcher outside every session (a launchd `WatchPaths` job, never an interval): `inbox` mode notifies once per event the runner left unconsumed for `--stall-minutes`; `progress` mode, armed by a marker file, notifies once per silence of the watched paths. The notifier is the instance's argv (`--notify-cmd`) |
+| `sentinel.py` | the watcher outside every session (a launchd `WatchPaths` job, never an interval): `inbox` mode notifies once per event the runner left unconsumed for `--stall-minutes`; `progress` mode, armed by a marker file, notifies once per silence of the watched paths (a stat walk bounded by `--max-depth`, never entering dot-dirs or build trees). The notifier is the instance's argv (`--notify-cmd`) |
 | `preflight.py` | refuses an unattended start when any step's command template could ask for approval under the session's permission settings (deny, ask, no allow rule, compound or `cd`); passes under `bypassPermissions` with a caveat |
 | `tests/test_pipeline.py` | `python3 -m unittest discover -s pipeline/tests` |
 | `metaos_pipeline/`, `tests/` | each has its own index — [[pipeline/metaos_pipeline/_index\|metaos_pipeline/]] · [[pipeline/tests/_index\|tests/]] |

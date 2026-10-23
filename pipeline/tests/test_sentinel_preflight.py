@@ -129,6 +129,24 @@ class ProgressMode(SentinelCase):
         t.start()
         return t
 
+    def test_scan_is_bounded_and_skips_build_and_dot_dirs(self):
+        old = time.time() - 3600
+        paths = {name: os.path.join(self.work, *name.split("/")) for name in
+                 ("a/shallow", "a/b/c/deep", "node_modules/x", ".git/HEAD", "target/out")}
+        for path in paths.values():
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            open(path, "w").close()
+        for root, dirs, files in os.walk(self.work):
+            for name in dirs + files:
+                os.utime(os.path.join(root, name), (old, old))
+        os.utime(self.work, (old, old))
+        for name in ("a/b/c/deep", "node_modules/x", ".git/HEAD", "target/out"):
+            os.utime(paths[name], None)              # changed now, but deep or in a skipped dir
+            self.assertLess(sentinel.latest_mtime([self.work])[0], old + 1, name)
+            os.utime(paths[name], (old, old))
+        os.utime(paths["a/shallow"], None)
+        self.assertEqual(sentinel.latest_mtime([self.work]), (os.stat(paths["a/shallow"]).st_mtime, paths["a/shallow"]))
+
     def test_unarmed_exits_at_once(self):
         os.remove(self.marker)
         self.progress_run()

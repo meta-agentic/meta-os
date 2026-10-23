@@ -15,7 +15,13 @@ writes one `vault_commit` event, the new `HEAD`, to the runner's inbox when
 
 ## Installing
 
-From the clone's own `.git/hooks/post-commit` and `post-merge`, call
-`sh <framework>/pipeline/hooks/post-commit` (or `post-merge`), and export
-`METAOS_PIPELINE_INBOX` in the environment that commits. A symlinked hook also needs
-`METAOS_PIPELINE_DIR=<framework>/pipeline`, because it finds the package from its own path.
+The instance installs each hook as a one-line wrapper in the clone's own `.git/hooks/` that
+calls the framework's hook, so the hook finds the package from its real path:
+
+```sh
+#!/bin/sh
+sh <framework>/pipeline/hooks/post-commit    # post-merge: the same, with post-merge
+```
+
+`METAOS_PIPELINE_INBOX` is exported in the environment that commits. Where the clone already
+has a hook, the line goes at its end. `METAOS_PIPELINE_DIR` overrides the package location.

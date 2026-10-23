@@ -6,8 +6,8 @@
 GitHub cannot push to a private machine, so every `--poll-seconds` this asks for each target
 with a conditional request (`If-None-Match` and the stored ETag). A `304` costs no rate limit
 and writes nothing. A `200` whose value changed (a branch's head SHA; a pull request's head
-SHA or `updated_at`) writes one `remote_change` event and stores the new ETag and value; the
-first answer for a target counts as a change. An error is reported and retried at the next
+SHA or `updated_at`) writes one `remote_change` event and stores the new ETag and value. The
+first answer for a target counts as a change: at most one pass per target after a restart. An error is reported and retried at the next
 poll, never fatal. The watcher never starts a pass and never writes the record.
 
 The targets file is the instance's: a JSON list of `owner/repo@branch` and `owner/repo#n`.
@@ -81,6 +81,7 @@ def poll_once(targets: list[dict], state: dict, inbox: str, api: str = API,
             with urllib.request.urlopen(req, timeout=30) as resp:
                 etag, body = resp.headers.get("ETag"), json.load(resp)
         except urllib.error.HTTPError as exc:
+            exc.close()
             if exc.code != 304:
                 print(f"remote_watch: {t['target']}: HTTP {exc.code}", file=sys.stderr)
             continue

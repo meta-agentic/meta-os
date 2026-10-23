@@ -2,7 +2,7 @@
 """The sentinel: notices that an expected event did not come, and tells a human once.
 
     sentinel.py inbox    --inbox DIR --state DIR [--stall-minutes M] [--runner-state FILE] [--notify-cmd ARGV...]
-    sentinel.py progress --marker FILE --watch PATH [--watch PATH ...] --state DIR [--stall-minutes M] [--notify-cmd ARGV...]
+    sentinel.py progress --marker FILE --watch PATH [--watch PATH ...] --state DIR [--max-depth N] [--stall-minutes M] [--notify-cmd ARGV...]
 
 It never starts work and never runs on an interval: launchd starts it on a file change
 (a `WatchPaths` job), and its only clock is a quiet timer that fires when nothing happened.
@@ -17,7 +17,9 @@ sentinel exits as soon as no event is waiting.
 `progress`: for interactive runs before the runner exists. A run's start writes `--marker`
 (launchd watches the marker's directory); removing it disarms the sentinel, which exits at
 its next check. While armed, progress is any file under a `--watch` path changing (mtime).
-Silence for `--stall-minutes` notifies once; the next progress re-arms it.
+The scan is a bounded stat walk: `--max-depth` levels (default 2), never entering
+dot-directories or `node_modules`, `target`, `build`, `dist`. Silence for `--stall-minutes`
+notifies once; the next progress re-arms it.
 
 Notify: `--notify-cmd` takes the rest of the command line as an argv, and the message is
 appended as its last argument. If it is absent or fails, the message goes to stderr and,
@@ -153,18 +155,27 @@ def run_inbox(args) -> int:
             state.save({"notified": seen})
 
 
-def latest_mtime(paths: list[str]) -> tuple[float, str]:
-    """The newest mtime under the watched paths (symlinks not followed), and the file that has it."""
+SKIP_DIRS = frozenset({"node_modules", "target", "build", "dist"})
+
+
+def latest_mtime(paths: list[str], max_depth: int = 2) -> tuple[float, str]:
+    """The newest mtime under the watched paths, and the file that has it.
+
+    A bounded stat walk: entries at most `max_depth` levels below each path, symlinks not
+    followed, dot-directories and SKIP_DIRS not entered, so a large tree stays cheap.
+    """
     best, where = 0.0, ""
-    stack = list(paths)
+    stack = [(p, 0) for p in paths]
     while stack:
-        path = stack.pop()
+        path, depth = stack.pop()
         try:
             st = os.stat(path, follow_symlinks=False)
             if st.st_mtime > best:
                 best, where = st.st_mtime, path
-            if os.path.isdir(path) and not os.path.islink(path):
-                stack.extend(e.path for e in os.scandir(path))
+            if depth < max_depth and os.path.isdir(path) and not os.path.islink(path):
+                for e in os.scandir(path):
+                    if not (e.is_dir(follow_symlinks=False) and (e.name.startswith(".") or e.name in SKIP_DIRS)):
+                        stack.append((e.path, depth + 1))
         except OSError:                             # vanished or unreadable: not progress
             continue
     return best, where
@@ -179,7 +190,7 @@ def run_progress(args) -> int:
     with lock:
         while os.path.exists(args.marker):
             now = time.time()
-            last, where = latest_mtime([args.marker, *args.watch])
+            last, where = latest_mtime([args.marker, *args.watch], args.max_depth)
             if now - last < stall:
                 time.sleep(last + stall - now)
                 continue
@@ -207,11 +218,16 @@ def parse(argv: list[str] | None):
             p.add_argument("--marker", required=True, help="the file whose presence arms the sentinel")
             p.add_argument("--watch", action="append", default=[], required=True,
                            help="a file or directory whose changes count as progress (repeatable)")
+            p.add_argument("--max-depth", type=int, default=2,
+                           help="levels below each --watch path to scan (dot-dirs, node_modules, "
+                                "target, build, dist are never entered)")
         p.add_argument("--notify-cmd", nargs=argparse.REMAINDER, default=[],
                        help="argv of the notifier; the message is appended. Must come last")
     args = ap.parse_args(argv)
     if args.stall_minutes <= 0:
         ap.error("--stall-minutes must be positive")
+    if getattr(args, "max_depth", 0) < 0:
+        ap.error("--max-depth must not be negative")
     return args
 
 

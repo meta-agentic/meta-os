@@ -260,8 +260,8 @@ control as *pending* until the application event exists.
 
 | Quantity | Value |
 |---|---|
-| Tick interval | 10 min, and an early tick when a run ends or a control is made |
-| Heartbeat poll of running sessions | every tick, and by a lighter heartbeat between ticks if the tick interval is raised |
+| Pass | one per event (a step's exit, a rate-limit status, a window reset, a vault commit, a remote change, a quiet timer, a control); none without an event |
+| Liveness of running steps | progress (an exit, the step's log changing); a quiet timer of `swarm.stall_minutes` (5 min), never a poll |
 | Lanes in the proof-of-concept (`m_max`) | 3 |
 | Executable spaces in the proof of concept | two now; a third joins once the public-repository instance-data gate is in place |
 | Review-queue cap per space in the proof of concept (§5.1 rule 7) | 4 |
@@ -270,13 +270,13 @@ control as *pending* until the application event exists.
 
 One loop at a time, holding nothing it cannot rebuild from the record repository. It must run
 where the planner of record is reachable: while the solver is local-only, that is the machine
-that hosts it; once the solver is a reachable service, any host that reaches it. A routine
-wakes at most hourly, so the inner cadence of §6.3 comes from the loop itself.
-
-The runtime is a self-paced loop inside one persistent session on the solver's host, sleeping
-the tick interval between ticks and woken early by run-ending events and controls; a local
-scheduler restarts it if it dies, and the restarted loop resumes from the last committed tick.
-A loop started where the solver is unreachable runs on reasoning and says so on every tick. A
+that hosts it; once the solver is a reachable service, any host that reaches it. The runtime is the **runner** (`pipeline/tick.py run`, `pipeline/metaos_pipeline/runner.py`): a
+deterministic process, no model, kept alive by a local launchd agent (`pipeline/runner.plist.template`,
+KeepAlive), that blocks on its inbox of event files and runs one pass per batch of events. Lane
+steps are processes it starts under `step_wrap`; their exit is an event. A restarted runner
+resumes from the record alone: it adopts a `spawning` run whose step is found by its run id and
+fails an absent one without transitioning its item. A pass started where the solver is
+unreachable plans by reasoning and says so. A
 hosted runtime is a later decision.
 
 ## 7 · Budget: the two windows and the lane cap
@@ -286,28 +286,28 @@ Units are each window's own allowance, never currency. For each window `w ∈ {5
 (a fraction of the whole allowance, never spent) and `ĝ_w` the mileage in that window's units:
 
 ```
-ĝ_w     = EWMA over K ticks of ( drop in R_w during the tick / active lane-hours in the tick )
+ĝ_w     = EWMA over K readings of ( drop in R_w between readings / active lane-hours between them )
 m_w     = ⌊ max(0, R_w − ρ_w) / (H_w · ĝ_w) ⌋      lanes affordable, run continuously, until w resets
-m_cap   = min( m_max, m_5h, m_week )                feed-forward ceiling; moves at most one step per tick
+m_cap   = min( m_max, m_5h, m_week )                feed-forward ceiling; moves at most one step per pass
 freeze  when R_w < ρ_w for any w, or the provider reports a warning or rejection
 ```
 
 Inside `[m_min, m_cap]` the additive-increase, multiplicative-decrease law of
-[[systems/pipeline/control-spike]] still sets the working-lane count `m` tick by tick; `m_cap`
+[[systems/pipeline/control-spike]] still sets the working-lane count `m` pass by pass; `m_cap`
 only bounds it from above. Speculative runs (declared decisions only, at most a third of `m`)
 count against `m_cap` like any other run.
 
 The reserve is subtracted, not scaled: `(1 − ρ_w) · R_w` would shrink the reserve as the window
 drains and plan spending below the freeze threshold `R_w < ρ_w`. Mileage is estimated **per
 window** because the two windows have different allowances: one lane-hour is a larger share of
-the 5-hour window than of the week. Until `K` ticks have been
-observed, `ĝ_w` is seeded from the instance's declared calibration and flagged as seeded.
+the 5-hour window than of the week. Until `K` readings have been
+taken, `ĝ_w` is seeded from the instance's declared calibration and flagged as seeded.
 
 | Parameter | Value |
 |---|---|
 | `ρ_5h` | 0.15 |
 | `ρ_week` | 0.10 |
-| `K` (EWMA span) | 6 ticks |
+| `K` (EWMA span, `swarm.mileage_readings`) | 6 readings |
 | Spending the week faster than pro rata | not allowed |
 | Last hour before a reset | no start whose expected cost (`ĉ_w = ĝ_w ×` expected run hours) exceeds what is left above the reserve |
 | No sensor answers | fall back to the declared budget per hour, loudly (an event and a gauge), never silently |
@@ -369,7 +369,7 @@ sessions.
 
 | Condition | Test | Action |
 |---|---|---|
-| **Stale lane** | no session activity of any kind (a tool call, a commit, a message) for `stale_after`, so a long build is not reaped; or the session ended or failed without a PR; or the run is over its cap; or the session cannot be found | interrupt, reap, give the item back with retry + 1 and the reason |
+| **Stale lane** | no session activity of any kind (a tool call, a commit, a message) for `stall_minutes` (a live child build is progress, so a long build is not reaped); or the session ended or failed without a PR; or the run is over its cap; or the session cannot be found | interrupt, reap, give the item back with retry + 1 and the reason |
 | **Held** | the same item reaped `max_stale_reaps` times | hold it (a *needs PO* label and a raised blocker); it is no longer admissible |
 | **Deadlock or accounting anomaly** | a running item's blocker is not `DONE`; an `IN PROGRESS` item with no lane (orphan); one item on two lanes; a session recorded under two projects; tokens in use not matching items in flight; the record and the vault disagree | freeze the pipe with the reason; no reap, no transition |
 | **Unsafe ground** | a red default branch in a lane's project; the backlog's schema gate failing; a fetch of the backlog or the record failing | freeze the pipe with the reason |
@@ -377,7 +377,7 @@ sessions.
 
 | Parameter | Value |
 |---|---|
-| `stale_after` | 2 ticks (20 min) |
+| `stall_minutes` | 5 min with no progress (no step exit, its log unchanged): the step is killed and reaped |
 | `max_stale_reaps` | 2 |
 
 The watchdog's only backlog arc is the give-back; it never merges, closes, creates or widens
@@ -390,21 +390,26 @@ place for secrets. It holds the loop's state (pipe, lanes, controls), each tick'
 results, an append-only event log, the run log, the reflections, and the window reports.
 Tracker ids may appear in it.
 
-It has two writers: the loop, which makes **tick commits**, and the CLI, which makes **control
-commits** (§8.1). The loop fetches before every write and makes one commit per tick. A tick in
-which nothing happened amends the previous tick's commit, but only while that commit is
-unpushed and is the loop's own: the loop never amends a commit it did not make, so a control
-commit at the tip means the next tick is a new commit. It pushes on a meaningful event (a
-start, an end, a reap, a control, a freeze) and at least hourly. When a fetch shows the remote
-has advanced, the loop looks at what arrived: if it is only control commits, the loop rebases
-its unpushed tick commits over them and carries on; a tick commit it did not make means
-another loop is running, and this one stops. Nothing is ever force-pushed, by either writer.
+It has two writers: the runner, which makes **pass commits**, and the CLI, which makes **control
+commits** (§8.1). The runner has no cadence: it runs one pass per event, fetches before every
+pass, and makes **one commit per pass that changed something, pushed at once**; a pass that
+changed nothing writes nothing, and with no event there is no pass. A pass that starts steps
+first commits its planned runs locally as `spawning` and amends that commit once the starts are
+recorded, so a runner killed in between leaves the runs for its successor to adopt or fail, and
+the pass is still one pushed commit. The push is the arbiter: a pass whose push is rejected is
+discarded and replayed from the new state, and the runner holds the lease (`loop` in
+`state.json`: holder, host, pid, started, epoch, no expiry), which only `tick.py control lease
+take` moves to another machine. Nothing is ever force-pushed, by either writer.
+
+**Lapsed (2026-10-22).** Ruling 4's *an idle tick amends the loop's own unpushed commit* and its
+*push at least hourly* existed so that idle ticks would not flood the history. With no idle
+passes there is nothing to amend and nothing to push on a clock; both lapse.
 The window report is also filed in the instance's memory. Retention: everything is kept, since it
 is text and the history is the audit trail.
 
 ## 11 · Configuration
 
-Instance-level, in two places. The numbers and identities live in the estate config's `meta-os.swarm` namespace ([[systems/config]], validated by the config schema): the lane slots, the token cap, the fairness share, the review limits, a run's budget multiple, the retry cap, the tick interval, the window reserves, the mileage span, the watchdog's thresholds, the executable spaces, the record repository, the planner port and the dashboard's control switch. The loop reads them and never writes them (§4). The pipeline's own configuration file, which `pipeline/tick.py` takes on its command line, keeps what is text rather than a bound: the lane prompt, the public-repository note, and how each space's items route to repositories. [[systems/config]] lists every key with its default.
+Instance-level, in two places. The numbers and identities live in the estate config's `meta-os.swarm` namespace ([[systems/config]], validated by the config schema): the lane slots, the token cap, the fairness share, the review limits, a run's budget multiple, the retry cap, the window reserves, the mileage span (`mileage_readings`), the quiet timer (`stall_minutes`), the unattended switch (`unattended_after_minutes`), the remote watcher's interval (`remote_poll_seconds`), the build slots (`build_slots`), the watchdog's thresholds, the executable spaces, the record repository, the planner port and the dashboard's control switch. No key sets a tick interval or a cold-solve period: time never starts work, and a clock appears only as a quiet timer. The loop reads them and never writes them (§4). The pipeline's own configuration file, which `pipeline/tick.py` takes on its command line, keeps what is text rather than a bound: the lane prompt, the public-repository note, the step and supervisor commands (`step_command`, `supervisor_command`), and how each space's items route to repositories. [[systems/config]] lists every key with its default.
 
 ## 12 · Failure modes this design closes
 
@@ -437,7 +442,7 @@ backlog and records the outcome next to its decisions.
    `stopped` within the acknowledgement bound.
 5. **Pipe wins.** With the pipe paused, `start lane-3` changes nothing, and the event records
    why.
-6. **Stale reap, then hold.** A session stops emitting events. After `stale_after` the lane is
+6. **Stale reap, then hold.** A session stops emitting events. After `stall_minutes` without progress the step is killed and the lane is
    reaped, the item goes back with retry + 1; the second reap of the same item holds it.
 7. **Deadlock freezes.** A running item's blocker is moved back from `DONE`. The next tick
    freezes the pipe with that reason, and nothing starts until a human unfreezes.
@@ -456,7 +461,7 @@ maintainer ruled all nine on 2026-10-21; the sections above state the result.
 1. **Lane model** (§6.3): accepted as proposed; three lanes, a bound lane may sit idle, a lane drains before it rebinds, and no session serves two projects.
 2. **Controls** (§6.2): accepted, amended; stop interrupts the session immediately, pause and start act within one tick, and the pipe beats the lane.
 3. **Budget** (§7): accepted as proposed; reserves 0.15 and 0.10, per-window mileage over 6 ticks, the week spent no faster than pro rata, and the last-hour rule.
-4. **Record repository** (§10): accepted, amended; the instance's private record repository, named in configuration, gets one commit per tick, an idle tick amends only the loop's own unpushed commit, human control commits are rebased over rather than treated as another loop, nothing is force-pushed, and it is pushed on a meaningful event or at least hourly.
+4. **Record repository** (§10): accepted, amended; the instance's private record repository, named in configuration, gets one commit per tick, an idle tick amends only the loop's own unpushed commit, human control commits are rebased over rather than treated as another loop, nothing is force-pushed, and it is pushed on a meaningful event or at least hourly. *Amended 2026-10-22: one commit per pass that changed something, pushed at once; amend-while-idle and the hourly push lapsed (§10).*
 5. **Dashboard writes** (§8.2): accepted as proposed; start, pause, stop and bind per lane and pipe, through the CLI, only on a local-source dashboard with the instance setting on.
 6. **Loop runtime** (§6.4): accepted as proposed; a self-paced loop in one persistent session on the solver's host, a 10-minute tick, restarted by a local scheduler.
 7. **Thresholds** (§9): accepted, amended; liveness is any session activity, stale after 2 ticks without it, a run capped at three times its estimate, held after 2 reaps, and a stall reported after 3 idle ticks with admissible work.

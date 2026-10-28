@@ -62,7 +62,7 @@ optional; the file may be omitted entirely (defaults apply). Shape:
   memory falls back to the instance's own `memory/{raw,wiki,output}` as the sole canon root
   plus `vaults/*` as federated mounts — byte-for-byte the prior behaviour.
 
-- **`swarm`** — the autonomous pipeline's bounds, cadence and identities ([[systems/pipeline]]). The loop reads them and never writes them; the pipeline's own configuration file keeps the lane prompt and the routing of items to repositories. Every key is optional:
+- **`swarm`** — the autonomous pipeline's bounds, quiet timers and identities ([[systems/pipeline]]). The loop reads them and never writes them; the pipeline's own configuration file keeps the lane prompt and the routing of items to repositories. Every key is optional:
 
 | Key | Meaning | Default |
 |---|---|---|
@@ -75,19 +75,19 @@ optional; the file may be omitted entirely (defaults apply). Shape:
 | `review_queue_cap` | the most items one space may hold in review before it takes no new work | 4 |
 | `lane_budget` | a run's cap as a multiple of its expected cost | 3 |
 | `max_retries` | give-backs before an item is no longer admissible | 2 |
-| `tick_minutes` | the tick interval; an early tick follows a run's end or a control | 10 |
 | `reserves.five_hour`, `reserves.week` | the share of each window's allowance never spent | 0.15, 0.10 |
-| `mileage_ticks` | the span of the per-window mileage average | 6 |
-| `stale_after_ticks` | ticks without any session activity before a lane is reaped | 2 |
+| `mileage_readings` | the span, in budget readings, of the per-window mileage average | 6 |
+| `stall_minutes` | the quiet timer: a step with no progress (no exit, its log unchanged) for this long is killed and reaped; also the sentinel's limit for an unconsumed event | 5 |
 | `max_stale_reaps` | reaps of one item before it is held for a human | 2 |
-| `stall_after_ticks` | idle ticks with admissible work before a stall is reported | 3 |
+| `unattended_after_minutes` | a question to the human unanswered this long switches the pipe to unattended | 30 |
+| `remote_poll_seconds` | the remote watcher's interval, the one poll; it only writes events | 60 |
+| `build_slots` | full builds the runner runs at once on one machine | 1 |
 | `executable_spaces` | the spaces whose items the pipeline may start | `[]` (none) |
 | `record_repository.url`, `.path` | the private repository the loop writes, and its local clone ([[pipeline/record]]) | none: the record stays in the plain directory `tick.py --state` names |
 | `planner.adapter` | `command` or `reasoning` | `reasoning` |
 | `planner.command` | the planner command and its arguments | none |
 | `planner.repair_max_items`, `.churn_cap` | repair when a change touches at most this many items or one lane; solve cold past this edit distance | 5, 10 |
-| `planner.cold_every_hours` | hours between scheduled cold solves (one also runs at window start) | 6 |
-| `planner.repair_timeout_seconds`, `.cold_timeout_seconds` | time allowed before the tick plans by reasoning | 30, 90 |
+| `planner.repair_timeout_seconds`, `.cold_timeout_seconds` | time allowed before the pass plans by reasoning | 30, 90 |
 | `dashboard_controls` | the Pipeline tab's controls on a local-source dashboard; never on a hosted one | `false` |
 | `visibility_probe` | probe each run's repository through `scripts/public_repo_gate.py` | `false` |
 

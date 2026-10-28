@@ -43,7 +43,7 @@
     },
     "swarm": {
       "type": "object",
-      "description": "The autonomous pipeline's bounds, cadence and identities (systems/pipeline.md). The loop reads these and never writes them; prompts and repository routing stay in the pipeline's own configuration file. Every key is optional; omitted, the default applies.",
+      "description": "The autonomous pipeline's bounds, quiet timers and identities (systems/pipeline.md). The loop reads these and never writes them; prompts and repository routing stay in the pipeline's own configuration file. Every key is optional; omitted, the default applies.",
       "properties": {
         "lanes": {"type": "integer", "description": "m_max: the lane slots. The sizing rule gives 5; a proof of concept uses 3.", "default": 5, "minimum": 1},
         "min_lanes": {"type": "integer", "description": "m_min: the fewest working lanes the regulator keeps while the pipe runs.", "default": 1, "minimum": 1},
@@ -54,7 +54,6 @@
         "review_queue_cap": {"type": "integer", "description": "The most items one space may hold in review before it takes no new work.", "default": 4, "minimum": 1},
         "lane_budget": {"type": "number", "description": "A run's cap, as a multiple of its expected cost; over it the run is interrupted and given back.", "default": 3, "minimum": 1},
         "max_retries": {"type": "integer", "description": "How many times an item may be given back before it is no longer admissible.", "default": 2, "minimum": 0},
-        "tick_minutes": {"type": "integer", "description": "The tick interval; an early tick follows a run's end or a control.", "default": 10, "minimum": 1},
         "reserves": {
           "type": "object",
           "description": "The fraction of each usage window's allowance never spent.",
@@ -64,10 +63,12 @@
           },
           "additionalProperties": false
         },
-        "mileage_ticks": {"type": "integer", "description": "The span, in ticks, of the per-window mileage average.", "default": 6, "minimum": 1},
-        "stale_after_ticks": {"type": "integer", "description": "Ticks without any session activity before a lane is stale and reaped.", "default": 2, "minimum": 1},
+        "mileage_readings": {"type": "integer", "description": "The span, in budget readings, of the per-window mileage average.", "default": 6, "minimum": 1},
+        "stall_minutes": {"type": "number", "description": "The quiet timer: a step with no progress (no exit, its log unchanged) for this long is killed and reaped; also the sentinel's limit for an unconsumed event.", "default": 5, "exclusiveMinimum": 0},
         "max_stale_reaps": {"type": "integer", "description": "Reaps of the same item before it is held for a human.", "default": 2, "minimum": 1},
-        "stall_after_ticks": {"type": "integer", "description": "Ticks with every lane idle while admissible work exists before a stall is reported.", "default": 3, "minimum": 1},
+        "unattended_after_minutes": {"type": "number", "description": "A question to the human unanswered this long switches the pipe to unattended.", "default": 30, "exclusiveMinimum": 0},
+        "remote_poll_seconds": {"type": "integer", "description": "The remote watcher's interval, the one poll in the design; it only writes events.", "default": 60, "minimum": 1},
+        "build_slots": {"type": "integer", "description": "Full builds the runner runs at once on one machine.", "default": 1, "minimum": 1},
         "executable_spaces": {"type": "array", "items": {"type": "string"}, "default": [], "description": "The spaces whose items the pipeline may start. Empty: none."},
         "record_repository": {
           "type": "object",
@@ -86,9 +87,8 @@
             "command": {"type": "array", "items": {"type": "string"}, "description": "The planner command and its arguments, for the `command` adapter."},
             "repair_max_items": {"type": "integer", "description": "A change touching at most this many items, or one lane, is repaired rather than solved cold.", "default": 5, "minimum": 0},
             "churn_cap": {"type": "integer", "description": "A repair whose edit distance exceeds this is discarded for a cold solve.", "default": 10, "minimum": 0},
-            "cold_every_hours": {"type": "number", "description": "Hours between scheduled cold solves; one also runs at window start.", "default": 6, "minimum": 0},
-            "repair_timeout_seconds": {"type": "number", "description": "Time allowed for a repair before the tick plans by reasoning.", "default": 30, "minimum": 1},
-            "cold_timeout_seconds": {"type": "number", "description": "Time allowed for a cold solve before the tick plans by reasoning.", "default": 90, "minimum": 1}
+            "repair_timeout_seconds": {"type": "number", "description": "Time allowed for a repair before the pass plans by reasoning.", "default": 30, "minimum": 1},
+            "cold_timeout_seconds": {"type": "number", "description": "Time allowed for a cold solve before the pass plans by reasoning.", "default": 90, "minimum": 1}
           },
           "additionalProperties": false
         },

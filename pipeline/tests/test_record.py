@@ -171,9 +171,11 @@ class ReadContractTests(unittest.TestCase):
                 led.event("lane_started", lane_id="L3-a"); led.run({"phase": "plan", "tick": 3})
                 led.reflection({"tick": 3}); led.write_pass_file("plan", 3, 0.0, {"tick": 3, "spawn": []})
                 led.write_pass_file("results", 3, 0.0, {"spawned": []})
+                state = led.state(); n = led.finished_run(state, {"run_id": "r-3-abc", "outcome": "done"}); led.save_state(state)
             reads = {record.STATE_FILE: led.state(), record.LANES_FILE: led.lanes()[0], record.EVENTS_FILE: led.events()[0],
                      record.RUNS_FILE: led.runs()[0], record.REFLECTIONS_FILE: led.reflections()[0],
-                     record.PLAN_FILE: led.read_pass_file("plan", 3, 0.0), record.RESULTS_FILE: led.read_pass_file("results", 3, 0.0)}
+                     record.PLAN_FILE: led.read_pass_file("plan", 3, 0.0), record.RESULTS_FILE: led.read_pass_file("results", 3, 0.0),
+                     record.RUN_FILE: led.read_run(n)}
             self.assertEqual(sorted(reads), sorted(named))
             for name, obj in reads.items():
                 self.assertEqual(obj["schema"], record.SCHEMA, name)
@@ -220,7 +222,8 @@ class TickRecordTests(unittest.TestCase):
         plan = load(plan_out)
         ids = sorted(s["lane_id"] for s in plan["spawn"])
         self.assertTrue(ids)
-        self.assertEqual(self.repo.log()[0], "pass 1 plan: lanes changed: " + ", ".join(ids))
+        self.assertEqual(self.repo.log()[0], "pass 1 plan: lanes changed: " + ", ".join(f"lane-{n}" for n in range(1, 6)),
+                         "the first pass creates every slot")
         clone = os.path.join(self.repo.root, "clone")
         stored = json.dumps(load(Ledger(clone).pass_path("plan", 1, plan["ts"])))
         self.assertNotIn("body of", stored, "the record names the item body by hash, never copies it")

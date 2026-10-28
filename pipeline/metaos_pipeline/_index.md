@@ -15,6 +15,7 @@ observe steps and remotes and only write events to the runner's inbox.
 | `__init__.py` | Package docstring: the split between this package and the instance's harness. |
 | `admission.py` | The admission gate: which ready items a lane may start, the first failing rule as each exclusion's reason, orphans, and the planner hook (orders, never widens). |
 | `readyset.py` | Ready-set query over the vault; lane assignment under the WIP cap, the one rule and the fairness cap. |
+| `slots.py` | Lane slots: `swarm.lanes` durable slots bound to one project, one run each, assignment that prefers the bound project, a rebind only when idle (`lane_rebound`), the drain, finished runs for `runs/run-<n>.json`, the heartbeat, and the per-pass invariant (a session under one project, an item in one slot). |
 | `controller.py` | AIMD regulator on the WIP cap `N`, rate-limit guard, per-lane cap, window budget. |
 | `speculate.py` | The speculation decision rule and the per-tick speculative plan. |
 | `reflect.py` | Predicted (queueing model) vs measured, attribution rules, escalations, the reflection record. |

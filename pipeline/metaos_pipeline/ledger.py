@@ -36,7 +36,9 @@ REFLECTIONS_FILE = "reflections.ndjson"
 PASSES_DIR = "passes"
 PLAN_FILE = PASSES_DIR + "/<date>/plan-<n>.json"
 RESULTS_FILE = PASSES_DIR + "/<date>/results-<n>.json"
-RECORD_FILES = (STATE_FILE, LANES_FILE, EVENTS_FILE, RUNS_FILE, REFLECTIONS_FILE, PLAN_FILE, RESULTS_FILE)
+RUN_DIR = "runs"
+RUN_FILE = RUN_DIR + "/run-<n>.json"
+RECORD_FILES = (STATE_FILE, LANES_FILE, EVENTS_FILE, RUNS_FILE, REFLECTIONS_FILE, PLAN_FILE, RESULTS_FILE, RUN_FILE)
 
 
 class LedgerError(Exception):
@@ -367,6 +369,25 @@ class Ledger:
     def read_pass_file(self, kind: str, n: int, ts: float) -> dict:
         with open(self.pass_path(kind, n, ts), encoding="utf-8") as fh:
             return _check(json.load(fh), f"{kind}-{n}.json")
+
+    # ---- finished runs: one immutable file each, numbered by the run counter in state.json ----
+    def finished_run(self, state: dict, doc: dict) -> int:
+        """File a finished run as `runs/run-<n>.json` and its line in `runs/_index.md`; the caller saves `state`."""
+        self._writable()
+        counters = state.setdefault("counters", {})
+        n = int(counters.get("run", 0)) + 1
+        counters["run"] = n
+        _atomic_write(os.path.join(self.dir, RUN_DIR, f"run-{n}.json"), json.dumps({**doc, "n": n, "schema": SCHEMA}, indent=1, sort_keys=True))
+        idx = os.path.join(self.dir, RUN_DIR, "_index.md")
+        if not os.path.exists(idx):
+            _atomic_write(idx, "# Finished runs\n\n")
+        with open(idx, "a", encoding="utf-8") as fh:
+            fh.write(f"- run-{n}: {doc.get('run_id')} {doc.get('lane_id')} {doc.get('item') or doc.get('decision')} {doc.get('outcome')}\n")
+        return n
+
+    def read_run(self, n: int) -> dict:
+        with open(os.path.join(self.dir, RUN_DIR, f"run-{n}.json"), encoding="utf-8") as fh:
+            return _check(json.load(fh), f"run-{n}.json")
 
 
 def usage_delta(lane: dict) -> tuple[float, float]:

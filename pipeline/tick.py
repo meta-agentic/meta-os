@@ -10,10 +10,11 @@ The record goes to the clone of `swarm.record_repository` when the estate config
 directory --state otherwise; the run line on stderr says which (`pipeline/record.md`).
 
 `plan` reads the vault and the ledger, runs the regulator and the reflection, and emits what
-the harness must do: which lanes to start (with their prompts), which sessions to check, which
-to interrupt. It marks chosen lanes `spawning` so a second `plan` before `record` cannot
-double-assign. `record` takes the harness's results (session ids, statuses, usage, PRs),
-updates the ledger, transitions items through the backlog CLI (the pipeline is the single
+the harness must do: which lane slots start a run (with their prompts), which sessions to check,
+which to interrupt. The slots (`swarm.lanes` of them, `metaos_pipeline/slots.py`) are created at
+the first pass; a chosen slot is `working` from the plan on, so a second `plan` before `record`
+cannot double-assign. `record` takes the harness's results (session ids, statuses, usage, PRs),
+updates the slots, files every finished run as `runs/run-<n>.json`, transitions items through the backlog CLI (the pipeline is the single
 writer of item status), and commits the vault. `report` renders the window for the human.
 """
 from __future__ import annotations
@@ -25,17 +26,18 @@ import os
 import subprocess
 import sys
 import time
-import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import yaml  # type: ignore
 
-from metaos_pipeline import admission, controller, readyset, reflect, speculate
+from metaos_pipeline import admission, controller, readyset, reflect, slots, speculate
 from metaos_pipeline import ledger as record
 from metaos_pipeline.ledger import Ledger, usage_delta
 
 ACTIVE = ("running", "spawning")
+# `swarm.lanes` when the estate config does not set it: the default of its schema.
+DEFAULT_LANES = 5
 
 
 def load_config(path: str) -> dict:
@@ -62,13 +64,25 @@ def find_metaos_config(cfg: dict, explicit: str | None) -> str | None:
         d = os.path.dirname(d)
 
 
+def load_estate(cfg: dict, metaos_config: str | None) -> tuple[str | None, dict]:
+    path = find_metaos_config(cfg, metaos_config)
+    if not path:
+        return None, {}
+    with open(path, encoding="utf-8") as fh:
+        return path, json.load(fh)
+
+
+def swarm_lanes(estate: dict) -> int:
+    """The number of lane slots, `swarm.lanes`; a value that is not a positive integer stops the run."""
+    n = (estate.get("swarm") or {}).get("lanes", DEFAULT_LANES)
+    if not isinstance(n, int) or isinstance(n, bool) or n < 1:
+        raise SystemExit(f"tick: swarm.lanes must be a positive integer, not {n!r}")
+    return n
+
+
 def open_ledger(cfg: dict, state_dir: str | None, metaos_config: str | None) -> Ledger:
     """The ledger over the record repository's clone when `swarm.record_repository` is set, else over --state."""
-    path = find_metaos_config(cfg, metaos_config)
-    estate: dict = {}
-    if path:
-        with open(path, encoding="utf-8") as fh:
-            estate = json.load(fh)
+    path, estate = load_estate(cfg, metaos_config)
     rr = (estate.get("swarm") or {}).get("record_repository") or {}
     if not rr.get("url"):
         if not state_dir:
@@ -153,6 +167,27 @@ def emit(text: str, out_path: str | None) -> None:
         print(text)
 
 
+def slot_record(led: Ledger) -> tuple[list[dict], str | None]:
+    """The slots, or an empty record and the reason when `lanes.json` is the prototype's per-run rows.
+
+    The old rows are not migrated (the instance's record migration archives them); in a plain
+    directory they are first copied aside to `lanes.prototype.json`, once, so nothing is lost.
+    """
+    lanes = led.lanes()
+    if slots.is_slot_record(lanes):
+        return lanes, None
+    aside = os.path.join(led.dir, "lanes.prototype.json")
+    if not led.remote and not os.path.exists(aside):
+        with open(aside, "w", encoding="utf-8") as fh:
+            json.dump(lanes, fh, indent=1, sort_keys=True)
+    return [], (f"lanes.json holds {len(lanes)} row(s) of schema 1 or without slots: the slot record starts empty"
+                + ("" if led.remote else "; the rows are kept in lanes.prototype.json"))
+
+
+def cost(row: dict) -> float:
+    return float((row.get("usage") or [{}])[-1].get("cost_usd", 0.0))
+
+
 # ---------------------------------------------------------------- plan
 def cmd_plan(cfg: dict, led: Ledger, out_path: str | None) -> int:
     reg = cfg.get("regulator") or {}
@@ -161,7 +196,12 @@ def cmd_plan(cfg: dict, led: Ledger, out_path: str | None) -> int:
                 "window_start": time.time(), "last_tick_ts": None}
     with led.locked("plan"):
         state = led.state(defaults)
-        lanes = led.lanes()
+        lanes, note = slot_record(led)
+        if note:
+            print(f"tick plan: {note}", file=sys.stderr)
+        slots.check_invariant(lanes)
+        rows, hist = slots.run_rows(lanes), slots.history_rows(lanes)
+        n_lanes = int(cfg.get("_swarm_lanes", DEFAULT_LANES))
         now = time.time()
         tick = int(state["tick"]) + 1
         hours = ((now - state["last_tick_ts"]) / 3600.0) if state.get("last_tick_ts") else float(cfg.get("tick_hours", 1.0))
@@ -171,7 +211,7 @@ def cmd_plan(cfg: dict, led: Ledger, out_path: str | None) -> int:
         # last two usage snapshots (or since its start when it has one), so a record step that
         # carried no usage cannot shrink the interval and inflate the reading.
         burn = 0.0
-        for l in lanes:
+        for l in rows:
             snaps = l.get("usage") or []
             if not snaps:
                 continue
@@ -181,11 +221,11 @@ def cmd_plan(cfg: dict, led: Ledger, out_path: str | None) -> int:
             dt_h = max((t1 - t0) / 3600.0, 1.0 / 60.0)
             if l.get("status") in ACTIVE or (now - t1) < 3600 * float(cfg.get("tick_hours", 1.0)):
                 burn += d_cost / dt_h
-        spent = sum(float((l.get("usage") or [{}])[-1].get("cost_usd", 0.0)) for l in lanes)
+        spent = float(state.get("spent_finished", 0.0)) + sum(cost(l) for l in rows)
         # Rate status is read only from snapshots taken at the latest record step: a rejection
         # seen last tick must not freeze the pipeline forever once the limit has reset.
-        latest_ts = max((float(s.get("ts", 0)) for l in lanes for s in (l.get("usage") or [])), default=0.0)
-        rate_status = severity([s.get("rate_status", "allowed") for l in lanes for s in (l.get("usage") or [])
+        latest_ts = max((float(s.get("ts", 0)) for l in rows for s in (l.get("usage") or [])), default=0.0)
+        rate_status = severity([s.get("rate_status", "allowed") for l in rows for s in (l.get("usage") or [])
                                 if float(s.get("ts", 0)) >= latest_ts - 60])
         # The harness may report the account's own status at record time (needed when no lane
         # is running to observe it through); the fresher reading wins.
@@ -201,8 +241,11 @@ def cmd_plan(cfg: dict, led: Ledger, out_path: str | None) -> int:
             led.run({"phase": "plan", "tick": tick, "ts": now, "refused": str(exc)})
             emit(json.dumps({"tick": tick, "ts": now, "refused": str(exc)}, indent=1), out_path)
             return 2
+        if note:
+            led.event("slot_record_reset", reason=note)
+        lanes = slots.ensure(lanes, n_lanes, led.event)
         ready = adm.admitted
-        active = [l for l in lanes if l.get("status") in ACTIVE]
+        active = rows
         lanes_saturated = len(active) >= int(state["N"]) and bool(ready)
 
         # ---- regulator
@@ -218,28 +261,28 @@ def cmd_plan(cfg: dict, led: Ledger, out_path: str | None) -> int:
         N = decision.N_new
 
         # ---- reap / interrupt lists
-        check = [{"lane_id": l["lane_id"], "session_id": l.get("session_id"), "branch": l.get("branch"),
+        check = [{"lane_id": l["lane_id"], "run_id": l["run_id"], "session_id": l.get("session_id"), "branch": l.get("branch"),
                   "repo": l.get("repo"), "kind": l.get("kind")} for l in active if l.get("session_id")]
         cap = float(reg.get("lane_cap", 0.0))
         interrupt = [l["lane_id"] for l in active
-                     if controller.over_cap(float((l.get("usage") or [{}])[-1].get("cost_usd", 0.0)), cap)]
+                     if controller.over_cap(cost(l), cap)]
 
         # ---- review-queue guard (reflection level 1): pause spaces whose pipeline output waits
         review_cap = int(cfg.get("review_cap_per_space", 4))
         paused: list[str] = []
         for space in (cfg.get("spaces") or {}):
-            n_review = len([l for l in lanes if l.get("space") == space and l.get("status") == "in_review"])
+            n_review = len([l for l in hist if l.get("space") == space and l.get("status") == "in_review"])
             if n_review >= review_cap:
                 paused.append(space)
 
         # ---- speculation first (it reserves its tokens), then work assignment
         spawn: list[dict] = []
         spec_spawn: list[dict] = []
-        free = max(0, N - len([l for l in lanes if l.get("status") in ACTIVE]))
+        free = min(max(0, N - len(rows)), len([s for s in lanes if slots.eligible(s, n_lanes)]))
         if not freeze and free > 0:
             spec_cfg = cfg.get("speculation") or {}
             cfg_dir = os.path.dirname(os.path.abspath(cfg.get("_config_path", ".")))
-            for plan in speculate.plan_speculation(spec_cfg.get("decisions") or [], lanes, N, free,
+            for plan in speculate.plan_speculation(spec_cfg.get("decisions") or [], rows + hist, N, free,
                                                    float(spec_cfg.get("share", 0.34)), float(spec_cfg.get("latency_days", 0.5))):
                 led.event("speculation_considered", decision=plan.decision_id, go=plan.go, reason=plan.reason, tick=tick)
                 if not plan.go:
@@ -249,37 +292,43 @@ def cmd_plan(cfg: dict, led: Ledger, out_path: str | None) -> int:
                     if br.get("prompt_file"):
                         with open(os.path.join(cfg_dir, br["prompt_file"]), encoding="utf-8") as fh:
                             prompt = fh.read()
-                    lane_id = f"S{tick}-{uuid.uuid4().hex[:6]}"
-                    lane = {"lane_id": lane_id, "kind": "spec", "decision": plan.decision_id, "branch_key": br["key"],
-                            "space": br.get("space", ""), "repo": br["repo"], "branch": br["outcome_branch"],
-                            "primary_tag": f"spec:{plan.decision_id}", "status": "spawning", "planned_tick": tick,
-                            "planned_ts": now, "usage": []}
-                    lanes.append(lane)
-                    spec_spawn.append({**{k: lane[k] for k in ("lane_id", "kind", "decision", "branch_key", "repo", "branch")},
-                                       "prompt": prompt})
+                    slot = slots.pick(lanes, br["repo"], n_lanes)
+                    if slot is None:
+                        break
+                    run = slots.start(slot, br["repo"], tick, now, led.event, kind="spec", decision=plan.decision_id,
+                                      branch_key=br["key"], space=br.get("space", ""), branch=br["outcome_branch"],
+                                      primary_tag=f"spec:{plan.decision_id}", retries=0)
+                    spec_spawn.append({"lane_id": slot["lane_id"], "run_id": run["run_id"], "repo": slot["project"],
+                                       **{k: run[k] for k in ("kind", "decision", "branch_key", "branch")}, "prompt": prompt})
                 free -= len(plan.branches)
+            rows = slots.run_rows(lanes)
             cfg_for_assign = dict(cfg); cfg_for_assign["regulator"] = dict(reg, N=N)
-            chosen = readyset.assign(ready, lanes, free, cfg_for_assign, paused) if free > 0 else []
+            chosen = readyset.assign(slots.prefer_bound(ready, lanes, n_lanes), rows, free, cfg_for_assign, paused) if free > 0 else []
             for it in chosen:
-                lane_id = f"L{tick}-{uuid.uuid4().hex[:6]}"
+                slot = slots.pick(lanes, it.repo, n_lanes)
+                if slot is None:
+                    break
+                ref = record.item_ref(cfg["vault"], it.path)
+                run = slots.start(slot, it.repo, tick, now, led.event, kind="work", item=it.id, space=it.space,
+                                  branch=it.branch, primary_tag=it.primary_tag, points=it.points, item_ref=ref,
+                                  retries=int((state.get("retries") or {}).get(it.id, 0)))
                 # The repository's visibility, probed or declared, decides the note and the title rule.
                 prompt = render(cfg.get("lane_prompt", ""), id=it.id, title=it.title, repo=it.repo, branch=it.branch,
                                 space=it.space, item_body=item_body(it.path, int(cfg.get("item_body_limit", 12000))),
                                 public_note=(cfg.get("public_repo_note", "") if it.public else ""),
-                                pr_title_prefix=("" if it.public else f"{it.id}: "))
-                lane = {"lane_id": lane_id, "kind": "work", "item": it.id, "space": it.space, "repo": it.repo,
-                        "branch": it.branch, "primary_tag": it.primary_tag, "status": "spawning",
-                        "planned_tick": tick, "planned_ts": now, "usage": [], "points": it.points,
-                        "item_ref": record.item_ref(cfg["vault"], it.path)}
-                lanes.append(lane)
-                spawn.append({**{k: lane[k] for k in ("lane_id", "kind", "item", "space", "repo", "branch", "item_ref")},
+                                pr_title_prefix=("" if it.public else f"{it.id}: "), lane_id=slot["lane_id"],
+                                project=slot["project"], vault_sha=ref["vault_sha"] or "", item_sha256=ref["sha256"])
+                spawn.append({"lane_id": slot["lane_id"], "run_id": run["run_id"], "repo": slot["project"],
+                              **{k: run[k] for k in ("kind", "item", "space", "branch", "item_ref")},
                               "title": it.title, "prompt": prompt})
+            rows = slots.run_rows(lanes)
+            slots.check_invariant(lanes)
 
         # ---- reflection
         model = reflect.load_model(cfg["model_path"])
         m_cfg = int(reg.get("N_max", 4))
         predicted = reflect.predict(model, m_cfg, N, state["calibration"])
-        measured = reflect.measure(cfg["vault"], lanes, led.runs(), burn, spent)
+        measured = reflect.measure(cfg["vault"], rows + hist, led.runs(), burn, spent)
         attribution, esc = reflect.attribute(predicted, measured, decision.reason, N, m_cfg)
         if freeze and rate_status != "allowed":
             esc.append(f"rate-limit status '{rate_status}' froze spawning; nothing starts until it clears")
@@ -294,8 +343,10 @@ def cmd_plan(cfg: dict, led: Ledger, out_path: str | None) -> int:
         plan = {"tick": tick, "ts": now, "N": N, "N_old": decision.N_old, "freeze": freeze, "burn_per_hour": round(burn, 3),
                 "setpoint_per_hour": round(target, 3), "rate_status": rate_status, "spent": round(spent, 3),
                 "ready_set": [i.id for i in ready], **adm.as_plan(), "paused_spaces": paused, "spawn": spawn, "spec_spawn": spec_spawn,
-                "check": check, "interrupt": interrupt, "reflection": refl}
-        led.run({"phase": "plan", **{k: v for k, v in plan.items() if k not in ("spawn", "spec_spawn", "reflection")},
+                "check": check, "interrupt": interrupt, "reflection": refl,
+                "lanes": [{k: s.get(k) for k in ("lane_id", "project", "actual")} for s in lanes]}
+        led.run({"phase": "plan", **({"slot_record": note} if note else {}),
+                 **{k: v for k, v in plan.items() if k not in ("spawn", "spec_spawn", "reflection", "lanes")},
                  "spawn_ids": [s["lane_id"] for s in spawn], "spec_ids": [s["lane_id"] for s in spec_spawn]})
         if led.remote:  # the record keeps the plan without its prompts: an item is named by item_ref
             led.write_pass_file("plan", tick, now, {**plan, "spawn": [{k: v for k, v in s.items() if k != "prompt"} for s in spawn],
@@ -349,67 +400,91 @@ def cmd_record(cfg: dict, led: Ledger, results_path: str) -> int:
     transitions: list[str] = []
     with led.locked("record"):
         state = led.state({"N": 1, "tick": 0, "spent": 0.0})
-        lanes = led.lanes()
+        lanes, note = slot_record(led)
+        if note:
+            print(f"tick record: {note}", file=sys.stderr)
+        slots.check_invariant(lanes)
         by_id = {l["lane_id"]: l for l in lanes}
+
+        def current(r: dict) -> dict | None:
+            """The slot a result is about, when it still holds the run the result names."""
+            slot = by_id.get(r.get("lane_id"))
+            if not slot or not slot["run"] or (r.get("run_id") and r["run_id"] != slot["run"]["run_id"]):
+                return None
+            return slot
+
+        def end(slot: dict, outcome: str, pr: dict | None = None, **extra) -> None:
+            final = cost(slot["run"])
+            doc = slots.finish(slot, outcome, now, pr)
+            n = led.finished_run(state, {**doc, **extra})
+            state["spent_finished"] = float(state.get("spent_finished", 0.0)) + final
+            led.event("lane_ended", lane_id=slot["lane_id"], run_id=doc["run_id"], status=outcome, item=doc.get("item"), run=n)
+            slots.settle(slot, led.event)
+
         if res.get("account_rate_status"):
             state["account_rate_status"] = {"status": res["account_rate_status"], "ts": now}
             led.event("account_rate_status", status=res["account_rate_status"])
         for s in res.get("spawned") or []:
-            lane = by_id.get(s["lane_id"])
-            if not lane:
+            slot = current(s)
+            if not slot:
                 continue
+            run = slot["run"]
             if s.get("ok"):
-                lane.update({"status": "running", "session_id": s.get("session_id"), "started": now})
-                led.event("lane_started", lane_id=lane["lane_id"], session_id=s.get("session_id"), item=lane.get("item"))
-                if lane["kind"] == "work":
-                    rc, msg = backlog(cfg, "transition", lane["item"], "IN PROGRESS")
-                    led.event("transition", item=lane["item"], to="IN PROGRESS", rc=rc, msg=msg[-200:])
+                slots.spawned(slot, s.get("session_id"), now)
+                led.event("lane_started", lane_id=slot["lane_id"], run_id=run["run_id"], session_id=s.get("session_id"), item=run.get("item"))
+                if run["kind"] == "work":
+                    rc, msg = backlog(cfg, "transition", run["item"], "IN PROGRESS")
+                    led.event("transition", item=run["item"], to="IN PROGRESS", rc=rc, msg=msg[-200:])
                     if rc == 0:
-                        transitions.append(f"{lane['item']} → IN PROGRESS (lane {lane['lane_id']}, session {s.get('session_id')}, branch {lane['branch']})")
+                        transitions.append(f"{run['item']} → IN PROGRESS (lane {slot['lane_id']}, session {s.get('session_id')}, branch {run['branch']})")
             else:
-                lane.update({"status": "failed_spawn", "ended": now, "error": s.get("error")})
-                led.event("lane_failed_spawn", lane_id=lane["lane_id"], error=s.get("error"))
+                led.event("lane_failed_spawn", lane_id=slot["lane_id"], run_id=run["run_id"], error=s.get("error"))
+                end(slot, "failed_spawn", error=s.get("error"))
         for c in res.get("checks") or []:
-            lane = by_id.get(c["lane_id"])
-            if not lane:
+            slot = current(c)
+            if not slot:
                 continue
+            run = slot["run"]
             u = c.get("usage") or {}
-            lane.setdefault("usage", []).append({"ts": now, "cost_usd": float(u.get("cost_usd", 0.0)),
-                                                 "tokens": float(u.get("tokens", 0.0)),
-                                                 "rate_status": c.get("rate_status", "allowed")})
+            run.setdefault("usage", []).append({"ts": now, "cost_usd": float(u.get("cost_usd", 0.0)),
+                                                "tokens": float(u.get("tokens", 0.0)),
+                                                "rate_status": c.get("rate_status", "allowed")})
+            # The session's own last activity when the harness reports it, else the moment it was read.
+            slots.heartbeat(slot, float(c.get("activity_ts") or now))
             st = (c.get("status") or "").lower()
             pr = c.get("pr")
             if pr:
-                lane["pr"] = pr
+                run["pr"] = pr
             if st in ("idle", "failed", "archived", "completed", "review_ready", "blocked") or c.get("ended"):
-                lane["ended"] = now
-                if lane["kind"] == "spec":
-                    lane["status"] = "done" if c.get("branch_pushed") else "failed"
+                if run["kind"] == "spec":
+                    outcome = "done" if c.get("branch_pushed") else "failed"
                 elif pr:
-                    lane["status"] = "in_review"
-                    rc, msg = backlog(cfg, "transition", lane["item"], "IN REVIEW")
-                    led.event("transition", item=lane["item"], to="IN REVIEW", rc=rc, msg=msg[-200:])
+                    outcome = "in_review"
+                    rc, msg = backlog(cfg, "transition", run["item"], "IN REVIEW")
+                    led.event("transition", item=run["item"], to="IN REVIEW", rc=rc, msg=msg[-200:])
                     if rc == 0:
-                        transitions.append(f"{lane['item']} → IN REVIEW (PR {pr.get('url', pr)})")
+                        transitions.append(f"{run['item']} → IN REVIEW (PR {pr.get('url', pr)})")
                 elif c.get("branch_pushed"):
-                    lane["status"] = "ended_no_pr"
+                    outcome = "ended_no_pr"
                 else:
-                    lane["status"] = "failed" if st == "failed" else "ended_empty"
+                    outcome = "failed" if st == "failed" else "ended_empty"
                     # Nothing was produced: hand the item back to the ready set (single writer),
                     # counting the attempt so a broken item cannot be retried forever.
-                    if lane["kind"] == "work" and lane.get("item"):
-                        rc, msg = backlog(cfg, "transition", lane["item"], "REFINED")
-                        led.event("transition", item=lane["item"], to="REFINED", rc=rc, msg=msg[-200:])
+                    if run.get("item"):
+                        tries = int((state.get("retries") or {}).get(run["item"], 0)) + 1
+                        rc, msg = backlog(cfg, "transition", run["item"], "REFINED")
+                        led.event("transition", item=run["item"], to="REFINED", rc=rc, msg=msg[-200:])
                         if rc == 0:
-                            transitions.append(f"{lane['item']} → REFINED (lane {lane['lane_id']} {lane['status']}; retry {int((state.get('retries') or {}).get(lane['item'], 0)) + 1})")
-                        state.setdefault("retries", {})[lane["item"]] = int((state.get("retries") or {}).get(lane["item"], 0)) + 1
-                led.event("lane_ended", lane_id=lane["lane_id"], status=lane["status"], item=lane.get("item"))
+                            transitions.append(f"{run['item']} → REFINED (lane {slot['lane_id']} {outcome}; retry {tries})")
+                        state.setdefault("retries", {})[run["item"]] = tries
+                end(slot, outcome, pr)
         for lid in res.get("interrupted") or []:
-            lane = by_id.get(lid)
-            if lane:
-                lane.update({"status": "interrupted", "ended": now})
-                led.event("lane_interrupted", lane_id=lid)
-        spent = sum(float((l.get("usage") or [{}])[-1].get("cost_usd", 0.0)) for l in lanes)
+            slot = current({"lane_id": lid})
+            if slot:
+                led.event("lane_interrupted", lane_id=lid, run_id=slot["run"]["run_id"])
+                end(slot, "interrupted")
+        slots.check_invariant(lanes)
+        spent = float(state.get("spent_finished", 0.0)) + sum(cost(l) for l in slots.run_rows(lanes))
         state.update({"last_tick_ts": now, "spent": spent})
         led.save_lanes(lanes)
         led.save_state(state)
@@ -417,7 +492,8 @@ def cmd_record(cfg: dict, led: Ledger, results_path: str) -> int:
             led.write_pass_file("results", int(state.get("tick") or 0), now, res)
         led.run({"phase": "record", "tick": state.get("tick"), "spent": round(spent, 3),
                  "transitions": transitions, "n_checks": len(res.get("checks") or []),
-                 "n_spawned_ok": len([s for s in (res.get("spawned") or []) if s.get("ok")])})
+                 "n_spawned_ok": len([s for s in (res.get("spawned") or []) if s.get("ok")]),
+                 **({"slot_record": note} if note else {})})
     msg = "pipeline tick %s: %s" % (state.get("tick"), "; ".join(transitions) if transitions else "no transitions")
     out = vault_commit(cfg, msg + "\n\nWritten by the autonomous pipeline's record step; lanes and usage in the instance ledger.") if transitions else "no transitions"
     print(json.dumps({"tick": state.get("tick"), "spent": round(spent, 3), "transitions": transitions, "vault": out}, indent=1))
@@ -427,18 +503,23 @@ def cmd_record(cfg: dict, led: Ledger, results_path: str) -> int:
 # ---------------------------------------------------------------- report
 def cmd_report(cfg: dict, led: Ledger, out_path: str | None) -> int:
     state = led.state({"N": 0, "tick": 0, "spent": 0.0})
-    lanes = led.lanes()
+    lanes, note = led.lanes(), None
+    if not slots.is_slot_record(lanes):
+        lanes, note = [], "lanes.json holds no slots yet: the next plan starts the slot record"
+    rows, hist = slots.run_rows(lanes), slots.history_rows(lanes)
     runs = led.runs()
     refl = led.reflections()
     reg = cfg.get("regulator") or {}
     L = ["# Pipeline window report", "",
          f"Ticks: {state.get('tick')} · N now {state.get('N')} (bounds {reg.get('N_min')}–{reg.get('N_max')}) · "
          f"spent {state.get('spent', 0):.2f} of budget {reg.get('budget')} · window {reg.get('window_hours')} h", ""]
-    L += ["## Lanes", "", "| lane | kind | item / decision | status | branch | PR | cost |", "|---|---|---|---|---|---|---|"]
-    for l in lanes:
-        cost = float((l.get("usage") or [{}])[-1].get("cost_usd", 0.0))
-        pr = l.get("pr") or {}
-        L.append(f"| {l['lane_id']} | {l['kind']} | {l.get('item') or l.get('decision')} | {l['status']} | `{l.get('branch','')}` | {pr.get('url','') } | {cost:.2f} |")
+    L += ["## Lanes", ""] + ([f"_{note}_", ""] if note else [])
+    L += ["| lane | project | state | run | item / decision | branch | cost | last runs |", "|---|---|---|---|---|---|---|---|"]
+    for sl in lanes:
+        run = sl.get("run") or {}
+        past = "; ".join(f"{h.get('item') or h.get('decision')} {h.get('outcome')}" for h in sl.get("history") or [])
+        L.append(f"| {sl['lane_id']} | {sl.get('project') or '—'} | {sl['actual']} | {run.get('run_id', '')} | "
+                 f"{run.get('item') or run.get('decision') or ''} | `{run.get('branch', '')}` | {cost(run):.2f} | {past} |")
     L += ["", "## Regulator trace", "", "| tick | N | burn/h | setpoint/h | rate | freeze | reason |", "|---|---|---|---|---|---|---|"]
     for r in runs:
         if r.get("phase") == "plan" and not r.get("refused"):
@@ -453,11 +534,11 @@ def cmd_report(cfg: dict, led: Ledger, out_path: str | None) -> int:
         for e in rr.get("escalations") or []:
             L.append(f"- ⚠ {e}")
         L.append("")
-    spec = [l for l in lanes if l["kind"] == "spec"]
+    spec = [l for l in rows + hist if l.get("kind") == "spec"]
     if spec:
         L += ["## Speculative branches (read first, pick one)", ""]
         for l in spec:
-            L.append(f"- {l['decision']} / **{l['branch_key']}** → `{l['branch']}` on {l['repo']} — {l['status']}")
+            L.append(f"- {l['decision']} / **{l.get('branch_key', '')}** → `{l.get('branch', '')}` on {l.get('repo', l['lane_id'])} — {l['status']}")
         L.append("")
     last = next((r for r in reversed(runs) if r.get("phase") == "plan"), None)
     if last and (last.get("refused") or last.get("excluded") or last.get("orphans")):
@@ -475,11 +556,11 @@ def cmd_report(cfg: dict, led: Ledger, out_path: str | None) -> int:
         for e in rr.get("escalations") or []:
             if e not in seen:
                 seen.add(e); L.append(f"- [ ] {e}")
-    for l in lanes:
+    for l in hist:
         if l["status"] == "in_review":
-            L.append(f"- [ ] Review {l.get('item')}: {((l.get('pr') or {}).get('url')) or l.get('branch')}")
+            L.append(f"- [ ] Review {l.get('item')}: {l.get('pr') or l.get('run_id')}")
         if l["status"] in ("ended_no_pr", "ended_empty", "failed", "failed_spawn", "interrupted"):
-            L.append(f"- [ ] Lane {l['lane_id']} for {l.get('item') or l.get('decision')} ended `{l['status']}` — decide: retry, re-refine, or drop")
+            L.append(f"- [ ] Lane {l['lane_id']} run {l.get('run_id')} for {l.get('item') or l.get('decision')} ended `{l['status']}` — decide: retry, re-refine, or drop")
     text = "\n".join(L) + "\n"
     if out_path:
         with open(out_path, "w", encoding="utf-8") as fh:
@@ -501,6 +582,7 @@ def main(argv: list[str] | None = None) -> int:
     a = ap.parse_args(argv)
     cfg = load_config(a.config)
     cfg["_config_path"] = os.path.abspath(a.config)
+    cfg["_swarm_lanes"] = swarm_lanes(load_estate(cfg, a.metaos_config)[1])
     try:
         led = open_ledger(cfg, a.state, a.metaos_config)
         print(f"tick {a.cmd}: record in {led.describe()}", file=sys.stderr)

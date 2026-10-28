@@ -174,6 +174,24 @@ class Invariant(unittest.TestCase):
         with self.assertRaises(SystemExit):
             p.record({"checks": []})
 
+    def test_a_finished_sessions_id_reused_for_another_project_is_refused(self):
+        # Must fail without the session index: the run under org/app is filed and gone from lanes.json.
+        p = Pipe(self, lanes=1)
+        s = p.plan()["spawn"][0]
+        p.record({"spawned": [{"lane_id": "lane-1", "run_id": s["run_id"], "ok": True, "session_id": "sess-r"}]})
+        p.record({"checks": [{"lane_id": "lane-1", "status": "idle", "branch_pushed": True}]})
+        self.assertEqual(p.led().state()["sessions"], {"sess-r": s["repo"]})
+        led = p.led()
+        with led.locked():
+            lanes = led.lanes()
+            slots.start(lanes[0], "org/other", 9, 0.0, led.event, kind="work", item="SPACEA-1")
+            led.save_lanes(lanes)
+        with self.assertRaisesRegex(SystemExit, f"session sess-r served {s['repo']} and is now spawned under lane-1 for org/other"):
+            p.record({"spawned": [{"lane_id": "lane-1", "ok": True, "session_id": "sess-r"}]})
+        forged = working(1, "org/other", "SPACEA-1", "sess-r")
+        with self.assertRaisesRegex(slots.InvariantBroken, "session sess-r appears under 2 projects"):
+            slots.check_invariant([forged], {"sess-r": s["repo"]})
+
     def test_a_session_of_another_project_or_an_item_in_two_slots_is_refused(self):
         with self.assertRaisesRegex(slots.InvariantBroken, "session s1 serves org/infra under lane-1, which is bound to org/app"):
             slots.check_invariant([working(1, "org/app", "SPACEA-1", "s1", session_project="org/infra")])

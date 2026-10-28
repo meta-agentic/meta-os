@@ -199,7 +199,7 @@ def cmd_plan(cfg: dict, led: Ledger, out_path: str | None) -> int:
         lanes, note = slot_record(led)
         if note:
             print(f"tick plan: {note}", file=sys.stderr)
-        slots.check_invariant(lanes)
+        slots.check_invariant(lanes, state.get("sessions"))
         rows, hist = slots.run_rows(lanes), slots.history_rows(lanes)
         n_lanes = int(cfg.get("_swarm_lanes", DEFAULT_LANES))
         now = time.time()
@@ -322,7 +322,7 @@ def cmd_plan(cfg: dict, led: Ledger, out_path: str | None) -> int:
                               **{k: run[k] for k in ("kind", "item", "space", "branch", "item_ref")},
                               "title": it.title, "prompt": prompt})
             rows = slots.run_rows(lanes)
-            slots.check_invariant(lanes)
+            slots.check_invariant(lanes, state.get("sessions"))
 
         # ---- reflection
         model = reflect.load_model(cfg["model_path"])
@@ -403,7 +403,8 @@ def cmd_record(cfg: dict, led: Ledger, results_path: str) -> int:
         lanes, note = slot_record(led)
         if note:
             print(f"tick record: {note}", file=sys.stderr)
-        slots.check_invariant(lanes)
+        index = state.setdefault("sessions", {})
+        slots.check_invariant(lanes, index)
         by_id = {l["lane_id"]: l for l in lanes}
 
         def current(r: dict) -> dict | None:
@@ -416,6 +417,7 @@ def cmd_record(cfg: dict, led: Ledger, results_path: str) -> int:
         def end(slot: dict, outcome: str, pr: dict | None = None, **extra) -> None:
             final = cost(slot["run"])
             doc = slots.finish(slot, outcome, now, pr)
+            slots.index_sessions(index, doc)
             n = led.finished_run(state, {**doc, **extra})
             state["spent_finished"] = float(state.get("spent_finished", 0.0)) + final
             led.event("lane_ended", lane_id=slot["lane_id"], run_id=doc["run_id"], status=outcome, item=doc.get("item"), run=n)
@@ -430,7 +432,7 @@ def cmd_record(cfg: dict, led: Ledger, results_path: str) -> int:
                 continue
             run = slot["run"]
             if s.get("ok"):
-                slots.spawned(slot, s.get("session_id"), now)
+                slots.spawned(slot, s.get("session_id"), now, index)
                 led.event("lane_started", lane_id=slot["lane_id"], run_id=run["run_id"], session_id=s.get("session_id"), item=run.get("item"))
                 if run["kind"] == "work":
                     rc, msg = backlog(cfg, "transition", run["item"], "IN PROGRESS")
@@ -483,7 +485,7 @@ def cmd_record(cfg: dict, led: Ledger, results_path: str) -> int:
             if slot:
                 led.event("lane_interrupted", lane_id=lid, run_id=slot["run"]["run_id"])
                 end(slot, "interrupted")
-        slots.check_invariant(lanes)
+        slots.check_invariant(lanes, index)
         spent = float(state.get("spent_finished", 0.0)) + sum(cost(l) for l in slots.run_rows(lanes))
         state.update({"last_tick_ts": now, "spent": spent})
         led.save_lanes(lanes)

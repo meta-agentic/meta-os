@@ -122,7 +122,16 @@ def start(slot: dict, project: str, tick: int, now: float, emit: Emit, **fields)
     return run
 
 
-def spawned(slot: dict, session_id: str, now: float) -> None:
+def spawned(slot: dict, session_id: str, now: float, index: dict) -> None:
+    """Add the run's session; `index` (session id -> project, append-only, kept in state.json) records it.
+
+    A session the index already holds for another project is refused, finished runs included.
+    """
+    seen = index.get(session_id)
+    if seen is not None and seen != slot["project"]:
+        raise InvariantBroken(f"session {session_id} served {seen} and is now spawned under {slot['lane_id']} "
+                              f"for {slot['project']}: a session serves one project, ever")
+    index[session_id] = slot["project"]
     run = slot["run"]
     run["sessions"].append({"session_id": session_id, "project": slot["project"], "started": now, "ended": None})
     run["started"] = run["started"] or now
@@ -159,8 +168,15 @@ def settle(slot: dict, emit: Emit) -> None:
         rebind(slot, pending["to"], pending["reason"], emit)
 
 
-def check_invariant(slots: Iterable[dict]) -> None:
-    """Every pass: a session under exactly one project, a run's project its slot's, one slot per item."""
+def index_sessions(index: dict, doc: dict) -> None:
+    """Add a filed run's sessions to the session index (never rewriting an entry)."""
+    for sess in doc.get("sessions") or []:
+        index.setdefault(sess["session_id"], sess.get("project"))
+
+
+def check_invariant(slots: Iterable[dict], index: dict | None = None) -> None:
+    """Every pass: a session under exactly one project (finished runs included, through `index`),
+    a run's project its slot's, one slot per item."""
     projects: dict[str, set] = {}
     items: dict[str, str] = {}
     for s in slots:
@@ -178,6 +194,8 @@ def check_invariant(slots: Iterable[dict]) -> None:
             items[key] = s["lane_id"]
         for sess in run.get("sessions") or []:
             projects.setdefault(sess["session_id"], set()).add(sess.get("project"))
+            if index and sess["session_id"] in index:
+                projects[sess["session_id"]].add(index[sess["session_id"]])
             if sess.get("project") != s.get("project"):
                 raise InvariantBroken(f"session {sess['session_id']} serves {sess.get('project')} under "
                                       f"{s['lane_id']}, which is bound to {s.get('project')}")

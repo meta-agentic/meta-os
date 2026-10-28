@@ -3,8 +3,9 @@
     tick.py --config CFG [--state DIR] run --inbox DIR [--work DIR]
 
 It takes the lease, then blocks on the inbox and runs one pass per batch of events. The wait
-costs nothing while idle: kqueue on the inbox directory where the platform has it, elsewhere a
-look every `POLL_SECONDS` (the documented fallback). No event, no pass.
+costs nothing while idle: the kernel's file events on the inbox directory (kqueue on macOS and
+the BSDs, inotify on Linux), and only where neither exists a look every `POLL_SECONDS`, the
+declared fallback, which says so when the runner starts. No event, no pass.
 
 A pass, under the record's lock (one fetch, one commit, pushed at once):
 
@@ -29,6 +30,8 @@ A step is `step_command` from the pipeline config, an argv whose `{prompt_file}`
 """
 from __future__ import annotations
 
+import ctypes
+import ctypes.util
 import json
 import os
 import select
@@ -108,7 +111,7 @@ class KqueueWaiter:
 
 
 class PollWaiter:
-    """The fallback where kqueue is missing: looks for an event every `seconds`."""
+    """The declared fallback where the platform has no kernel file events: looks every `seconds`."""
 
     def __init__(self, inbox: str, seconds: float = POLL_SECONDS,
                  clock: Callable[[], float] = time.monotonic, sleep: Callable[[float], None] = time.sleep):
@@ -123,8 +126,58 @@ class PollWaiter:
             self.sleep(self.seconds if left is None else min(self.seconds, left))
 
 
+class InotifyWaiter:
+    """Linux: wakes on a file created, moved in, written or removed in the inbox, or at the timeout.
+
+    Through the C library's inotify calls (ctypes, no dependency); costs nothing while idle.
+    """
+
+    IN_CLOSE_WRITE, IN_MOVED_TO, IN_CREATE, IN_DELETE = 0x8, 0x80, 0x100, 0x200
+    IN_NONBLOCK, IN_CLOEXEC = 0o4000, 0o2000000
+
+    def __init__(self, inbox: str, libc=None):
+        self.libc = libc or inotify_libc()
+        if self.libc is None:
+            raise OSError("inotify is not available on this platform")
+        self.fd = self.libc.inotify_init1(self.IN_NONBLOCK | self.IN_CLOEXEC)
+        if self.fd < 0:
+            raise OSError(ctypes.get_errno(), "inotify_init1 failed")
+        mask = self.IN_CLOSE_WRITE | self.IN_MOVED_TO | self.IN_CREATE | self.IN_DELETE
+        if self.libc.inotify_add_watch(self.fd, os.fsencode(inbox), mask) < 0:
+            err = ctypes.get_errno()
+            os.close(self.fd)
+            raise OSError(err, f"inotify_add_watch failed on {inbox}")
+
+    def wait(self, timeout: float | None) -> None:
+        ready, _, _ = select.select([self.fd], [], [], timeout)
+        if ready:
+            try:
+                while os.read(self.fd, 65536):  # drain: the events only say that something changed
+                    pass
+            except BlockingIOError:
+                pass
+
+
+def inotify_libc():
+    """The C library with inotify, on Linux; None elsewhere."""
+    if not sys.platform.startswith("linux"):
+        return None
+    try:
+        libc = ctypes.CDLL(ctypes.util.find_library("c") or "libc.so.6", use_errno=True)
+    except OSError:
+        return None
+    return libc if hasattr(libc, "inotify_init1") and hasattr(libc, "inotify_add_watch") else None
+
+
 def waiter_for(inbox: str):
-    return KqueueWaiter(inbox) if hasattr(select, "kqueue") else PollWaiter(inbox)
+    """The platform's kernel file events on the inbox; the poll only where it has none, said once."""
+    if hasattr(select, "kqueue"):
+        return KqueueWaiter(inbox)
+    if inotify_libc() is not None:
+        return InotifyWaiter(inbox)
+    print(f"tick run: no kernel file events on this platform: looking at the inbox every {POLL_SECONDS:g} s",
+          file=sys.stderr)
+    return PollWaiter(inbox)
 
 
 def fill(template: list[str], fields: dict) -> list[str]:

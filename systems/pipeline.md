@@ -271,8 +271,8 @@ control as *pending* until the application event exists.
 One loop at a time, holding nothing it cannot rebuild from the record repository. It must run
 where the planner of record is reachable: while the solver is local-only, that is the machine
 that hosts it; once the solver is a reachable service, any host that reaches it. The runtime is the **runner** (`pipeline/tick.py run`, `pipeline/metaos_pipeline/runner.py`): a
-deterministic process, no model, kept alive by a local launchd agent (`pipeline/runner.plist.template`,
-KeepAlive), that blocks on its inbox of event files and runs one pass per batch of events. Lane
+deterministic process, no model, kept alive by the instance's service manager, which restarts it on a crash (templates:
+`pipeline/runner.plist.template` for launchd, `pipeline/systemd/` for systemd), that blocks on its inbox of event files and runs one pass per batch of events. Lane
 steps are processes it starts under `step_wrap`; their exit is an event. A restarted runner
 resumes from the record alone: it adopts a `spawning` run whose step is found by its run id and
 fails an absent one without transitioning its item. A pass started where the solver is

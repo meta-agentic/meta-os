@@ -1,0 +1,18 @@
+# The sentinel in inbox mode as a systemd user service, started by metaos-sentinel.path.
+#
+#   __LABEL__        the unit's description label
+#   __PYTHON__       the interpreter
+#   __PIPELINE__     the framework's pipeline/ directory
+#   __INBOX__        the runner's inbox directory
+#   __STATE_DIR__    the sentinel's lock and notified record
+#   __STALL__        quiet minutes before a stall (the instance's swarm.stall_minutes)
+#   __NOTIFY__       the instance's notifier argv (the message is appended)
+#   __LOG_DIR__      where the sentinel's output goes
+[Unit]
+Description=__LABEL__ (meta-os sentinel)
+
+[Service]
+Type=oneshot
+ExecStart=__PYTHON__ __PIPELINE__/sentinel.py inbox --inbox __INBOX__ --state __STATE_DIR__ --stall-minutes __STALL__ --notify-cmd __NOTIFY__
+StandardOutput=append:__LOG_DIR__/sentinel.out.log
+StandardError=append:__LOG_DIR__/sentinel.err.log

@@ -1,0 +1,14 @@
+# The sentinel's trigger as a systemd path unit: systemd's equivalent of launchd's WatchPaths.
+# It starts metaos-sentinel.service when the runner's inbox changes, never on an interval.
+#
+#   __LABEL__      the unit's description label
+#   __INBOX__      the runner's inbox directory
+[Unit]
+Description=__LABEL__ (meta-os sentinel trigger)
+
+[Path]
+PathChanged=__INBOX__
+Unit=metaos-sentinel.service
+
+[Install]
+WantedBy=default.target

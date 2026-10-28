@@ -288,6 +288,36 @@ class WaiterTests(unittest.TestCase):
         w.wait(30)
         self.assertLess(time.monotonic() - t0, 5)
 
+    @unittest.skipUnless(runner.inotify_libc() is not None, "inotify only (Linux)")
+    def test_inotify_wakes_on_a_write_to_the_inbox(self):
+        w = runner.InotifyWaiter(self.inbox)
+        events.write_event(self.inbox, "vault_commit", "test")
+        t0 = time.monotonic()
+        w.wait(30)
+        self.assertLess(time.monotonic() - t0, 5)
+
+    @unittest.skipUnless(runner.inotify_libc() is not None, "inotify only (Linux)")
+    def test_inotify_returns_at_the_timeout_when_nothing_happens(self):
+        w = runner.InotifyWaiter(self.inbox)
+        t0 = time.monotonic()
+        w.wait(0.2)
+        self.assertLess(time.monotonic() - t0, 5)
+
+    def test_the_platform_chooses_kernel_events_and_polls_only_without_them(self):
+        from unittest import mock
+        has_kq = hasattr(runner.select, "kqueue")
+        w = runner.waiter_for(self.inbox)
+        if has_kq:
+            self.assertIsInstance(w, runner.KqueueWaiter)
+        elif runner.inotify_libc() is not None:
+            self.assertIsInstance(w, runner.InotifyWaiter)
+        with mock.patch.object(runner, "select", mock.Mock(spec=[])), \
+                mock.patch.object(runner, "inotify_libc", return_value=None), \
+                mock.patch.object(runner.sys, "stderr") as err:
+            w = runner.waiter_for(self.inbox)
+        self.assertIsInstance(w, runner.PollWaiter)
+        self.assertIn("no kernel file events", "".join(c.args[0] for c in err.write.call_args_list))
+
     def test_the_poll_fallback_looks_at_its_interval_and_returns_on_an_event(self):
         now, slept = [0.0], []
 
@@ -336,6 +366,42 @@ class LaunchdTemplateTests(unittest.TestCase):
         self.assertEqual(doc["KeepAlive"], {"SuccessfulExit": False})
         self.assertEqual(doc["ProgramArguments"][4:6], ["run", "--inbox"])
         self.assertNotRegex(text, rb"<string>/", "no absolute path: every path is a placeholder")
+
+
+class SystemdTemplateTests(unittest.TestCase):
+    DIR = os.path.join(os.path.dirname(HERE), "systemd")
+
+    def read(self, name):
+        with open(os.path.join(self.DIR, name), encoding="utf-8") as fh:
+            return fh.read()
+
+    def placeholders(self, text):
+        import re
+        return set(re.findall(r"__[A-Z_]+__", text))
+
+    def test_the_runner_unit_restarts_a_crash_only_with_the_launchd_placeholders(self):
+        unit = self.read("metaos-runner.service.template")
+        self.assertIn("Restart=on-failure", unit)
+        self.assertRegex(unit, r"ExecStart=__PYTHON__ __PIPELINE__/tick.py --config __CONFIG__ run --inbox __INBOX__")
+        with open(os.path.join(os.path.dirname(HERE), "runner.plist.template"), encoding="utf-8") as fh:
+            plist = fh.read()
+        self.assertEqual(self.placeholders(unit), self.placeholders(plist))
+
+    def test_the_sentinel_starts_on_an_inbox_change_never_on_an_interval(self):
+        path = self.read("metaos-sentinel.path.template")
+        self.assertIn("PathChanged=__INBOX__", path)
+        self.assertIn("Unit=metaos-sentinel.service", path)
+        service = self.read("metaos-sentinel.service.template")
+        self.assertIn("Type=oneshot", service)
+        self.assertIn("sentinel.py inbox --inbox __INBOX__", service)
+        for text in (path, service):
+            self.assertNotIn("OnCalendar", text)
+            self.assertNotIn("OnUnitActiveSec", text)
+
+    def test_every_path_is_a_placeholder(self):
+        for name in os.listdir(self.DIR):
+            if name.endswith(".template"):
+                self.assertNotRegex(self.read(name), r"(?m)=/|\s/[a-z]", name)
 
 
 if __name__ == "__main__":

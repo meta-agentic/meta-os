@@ -4,10 +4,11 @@
     sentinel.py inbox    --inbox DIR --state DIR [--stall-minutes M] [--runner-state FILE] [--notify-cmd ARGV...]
     sentinel.py progress --marker FILE --watch PATH [--watch PATH ...] --state DIR [--max-depth N] [--stall-minutes M] [--notify-cmd ARGV...]
 
-It never starts work and never runs on an interval: launchd starts it on a file change
-(a `WatchPaths` job), and its only clock is a quiet timer that fires when nothing happened.
+It never starts work and never runs on an interval: the instance's service manager starts it on
+a file change (launchd `WatchPaths`, a systemd `.path` unit), and its only clock is a quiet timer
+that fires when nothing happened.
 
-`inbox`: launchd starts it when the runner's inbox changes. An event is a regular file in
+`inbox`: it is started when the runner's inbox changes. An event is a regular file in
 the inbox; a name starting with `.` (above all `.tmp*`, a partial write) is not an event.
 The runner deletes an event once it has consumed it. The sentinel waits until the oldest
 unconsumed event is `--stall-minutes` old, re-checking only at that deadline. An event still
@@ -15,7 +16,7 @@ there at its deadline means the runner is hung: the notify command runs once for
 sentinel exits as soon as no event is waiting.
 
 `progress`: for interactive runs before the runner exists. A run's start writes `--marker`
-(launchd watches the marker's directory); removing it disarms the sentinel, which exits at
+(the service manager watches the marker's directory); removing it disarms the sentinel, which exits at
 its next check. While armed, progress is any file under a `--watch` path changing (mtime).
 The scan is a bounded stat walk: `--max-depth` levels (default 2), never entering
 dot-directories or `node_modules`, `target`, `build`, `dist`. Silence for `--stall-minutes`

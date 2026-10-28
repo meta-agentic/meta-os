@@ -1,0 +1,26 @@
+# The pipeline runner as a systemd user service. A template: the instance fills every
+# __PLACEHOLDER__ and installs the result under ~/.config/systemd/user/; the framework installs
+# nothing. The placeholders are the launchd template's (pipeline/runner.plist.template):
+#
+#   __LABEL__      the unit's description label, unique on the machine
+#   __PYTHON__     the interpreter (with PyYAML)
+#   __PIPELINE__   the framework's pipeline/ directory
+#   __CONFIG__     the instance's pipeline configuration file
+#   __INBOX__      the runner's inbox directory, outside the record clone's tracked tree
+#   __LOG_DIR__    where the runner's stdout and stderr go
+#
+# Restart=on-failure restarts a runner that crashed (a non-zero exit). A runner that lost the
+# lease, or was stopped cleanly, exits 0 and stays down, as under launchd's KeepAlive.
+[Unit]
+Description=__LABEL__ (meta-os pipeline runner)
+
+[Service]
+Type=simple
+ExecStart=__PYTHON__ __PIPELINE__/tick.py --config __CONFIG__ run --inbox __INBOX__
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:__LOG_DIR__/runner.out.log
+StandardError=append:__LOG_DIR__/runner.err.log
+
+[Install]
+WantedBy=default.target

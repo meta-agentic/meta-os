@@ -25,6 +25,9 @@ instance executes what `tick.py plan` emits and feeds the outcome back through
 | `metaos_pipeline/speculate.py` | the speculation decision rule and the per-tick speculative plan |
 | `metaos_pipeline/reflect.py` | predicted (queueing model) vs measured, attribution rules, escalations, the reflection record |
 | `metaos_pipeline/ledger.py` | atomic state, materialised lanes, append-only events / runs / reflections, a directory lock |
+| `metaos_pipeline/runner.py` | the event-driven runner behind `tick.py run`: the lease, a blocking wait on the inbox (kqueue, a poll only as the fallback), one pass per batch of events, steps started under `step_wrap`, quiet timers that kill and reap a silent step, the rate-limit hold, adoption of a lost pass's runs, the supervisor step as a pluggable command |
+| `metaos_pipeline/fake_engine.py` | the dry-run harness: a fake step engine with scripted exits, progress and rate-limit lines, and a scripted step command |
+| `runner.plist.template` | the runner's launchd agent (KeepAlive on a crash), placeholders only; the instance installs it |
 | `sentinel.py` | the watcher outside every session (a launchd `WatchPaths` job, never an interval): `inbox` mode notifies once per event the runner left unconsumed for `--stall-minutes`; `progress` mode, armed by a marker file, notifies once per silence of the watched paths (a stat walk bounded by `--max-depth`, never entering dot-dirs or build trees). The notifier is the instance's argv (`--notify-cmd`) |
 | `preflight.py` | refuses an unattended start when any step's command template could ask for approval under the session's permission settings (deny, ask, no allow rule, compound or `cd`); passes under `bypassPermissions` with a caveat |
 | `metaos_pipeline/events.py` | the runner's inbox: the event file format, its one atomic writer, `list_events`, the `emit` CLI, the one-shot window reset |

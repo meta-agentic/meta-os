@@ -19,6 +19,7 @@ instance executes what `tick.py plan` emits and feeds the outcome back through
 |---|---|
 | `tick.py` | CLI: `plan` (ready set → regulator → assignment → speculation → reflection), `record` (harness results → ledger → item transitions → vault commit), `report` (the human's morning page) |
 | `metaos_pipeline/admission.py` | the admission gate: executable space, status, blockers from the vault's dependency index (refuses a stale one), lane holds and retries, holding labels and parked epics; a reason for every exclusion, orphans for the watchdog, the planner's order among the admitted |
+| `metaos_pipeline/slots.py` | the lane slots: `swarm.lanes` durable slots, one project and one run each, a rebind only when idle and drained, finished runs filed in `runs/`, the per-pass session invariant |
 | `metaos_pipeline/readyset.py` | ready-set query over the vault; the one rule as a `(space, repo, primary tag)` heuristic; fairness cap |
 | `metaos_pipeline/controller.py` | AIMD regulator on the WIP cap `N`, rate-limit guard, per-lane cap, window budget |
 | `metaos_pipeline/speculate.py` | the speculation decision rule and the per-tick speculative plan |
@@ -38,20 +39,25 @@ instance executes what `tick.py plan` emits and feeds the outcome back through
 
 ## Contract with the harness
 
-`plan` writes a JSON document: `spawn[]` (work lanes: item, repo, branch, prompt), `admitted[]`, `excluded{id: reason}`, `orphans[]` and
+`plan` writes a JSON document: `lanes[]` (every slot's `lane_id`, `project`, `actual`), `spawn[]` (work runs: slot `lane_id`, `run_id`, item, repo, branch, prompt), `admitted[]`, `excluded{id: reason}`, `orphans[]` and
 `planner_ignored{id: reason}` from the admission gate (a stale dependency index makes `plan`
 exit 2 with `refused` and nothing else),
 `spec_spawn[]` (speculative lanes: decision, branch key, outcome branch, prompt), `check[]`
 (running sessions to poll), `interrupt[]` (lanes over their cap), `N`, `freeze`, gauges and
-the reflection record. The harness starts one headless session per spawn entry, polls the
+the reflection record. The lane prompt may use `{lane_id}`, `{project}`, `{vault_sha}` and
+`{item_sha256}` beside the item's fields. The harness starts one headless session per spawn entry, polls the
 sessions in `check`, and returns `results.json`:
 
 ```json
 { "spawned":  [{"lane_id": "...", "ok": true, "session_id": "..."}],
-  "checks":   [{"lane_id": "...", "status": "working|idle|failed|archived", "usage": {"cost_usd": 0, "tokens": 0},
+  "checks":   [{"lane_id": "...", "run_id": "...", "activity_ts": 0, "status": "working|idle|failed|archived", "usage": {"cost_usd": 0, "tokens": 0},
                 "rate_status": "allowed|allowed_warning|rejected", "pr": {"url": "...", "number": 0}, "branch_pushed": true}],
   "interrupted": ["..."] }
 ```
+
+A result naming a `run_id` the slot no longer holds is ignored. `activity_ts` is the session's
+last activity of any kind; `record` stamps it as the run's `heartbeat` (the time of reading when
+absent), and nothing polls for it.
 
 `record` is idempotent per lane state and is the **only writer of item status**: it
 transitions to `IN PROGRESS` when a lane starts and to `IN REVIEW` when a lane ends with a

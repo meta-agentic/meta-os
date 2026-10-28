@@ -268,10 +268,10 @@ class TickEndToEnd(unittest.TestCase):
                        "checks": []}
             rp = os.path.join(state, "r1.json"); write(rp, json.dumps(results))
             self.assertEqual(tick.main(["--config", cfg_path, "--state", state, "record", "--results", rp]), 0)
-            lanes = Ledger(state).lanes()
-            self.assertTrue(all(l["status"] == "running" for l in lanes))
+            lanes = [l for l in Ledger(state).lanes() if l["run"]]
+            self.assertTrue(lanes and all(l["actual"] == "working" and l["run"]["started"] for l in lanes))
             # usage check: over budget → next plan halves N and freezes when budget exhausted
-            checks = [{"lane_id": l["lane_id"], "session_id": l["session_id"], "status": "working",
+            checks = [{"lane_id": l["lane_id"], "session_id": l["run"]["sessions"][0]["session_id"], "status": "working",
                        "usage": {"cost_usd": 20.0, "tokens": 1e6}, "rate_status": "allowed"} for l in lanes]
             rp2 = os.path.join(state, "r2.json"); write(rp2, json.dumps({"checks": checks}))
             tick.main(["--config", cfg_path, "--state", state, "record", "--results", rp2])
@@ -286,7 +286,8 @@ class TickEndToEnd(unittest.TestCase):
             rp3 = os.path.join(state, "r3.json")
             write(rp3, json.dumps({"checks": [{"lane_id": l0["lane_id"], "status": "idle", "usage": {"cost_usd": 21.0}, "pr": {"url": "u", "number": 1}}]}))
             tick.main(["--config", cfg_path, "--state", state, "record", "--results", rp3])
-            self.assertEqual(Ledger(state).lanes()[0]["status"], "in_review")
+            done = next(l for l in Ledger(state).lanes() if l["lane_id"] == l0["lane_id"])
+            self.assertEqual((done["actual"], done["run"], done["history"][-1]["outcome"]), ("idle", None, "in_review"))
             out = os.path.join(state, "report.md")
             tick.main(["--config", cfg_path, "--state", state, "report", "--out", out])
             text = open(out).read()

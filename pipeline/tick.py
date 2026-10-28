@@ -4,6 +4,8 @@
     tick.py --config CFG [--state DIR] [--metaos-config FILE] plan   [--out plan.json]
     tick.py --config CFG [--state DIR] [--metaos-config FILE] record --results results.json
     tick.py --config CFG [--state DIR] [--metaos-config FILE] report [--out report.md]
+    tick.py --config CFG [--state DIR] [--metaos-config FILE] run    --inbox DIR [--work DIR]
+    tick.py --config CFG [--state DIR] [--metaos-config FILE] control lease take --reason R
 
 The record goes to the clone of `swarm.record_repository` when the estate config
 (`meta-os.config.json`, found above CFG or named by --metaos-config) sets it, and to the plain
@@ -16,13 +18,21 @@ the first pass; a chosen slot is `working` from the plan on, so a second `plan` 
 cannot double-assign. `record` takes the harness's results (session ids, statuses, usage, PRs),
 updates the slots, files every finished run as `runs/run-<n>.json`, transitions items through the backlog CLI (the pipeline is the single
 writer of item status), and commits the vault. `report` renders the window for the human.
+
+`run` is the event-driven runner (`metaos_pipeline/runner.py`): it takes the lease, blocks on
+the inbox and runs one pass (record, plan, start steps, record) per batch of events. While a
+runner holds the lease, `plan` and `record` refuse. `control lease take` is the human's move of
+the lease to this machine; a runner never takes a lease held on another host by itself.
 """
 from __future__ import annotations
 
 import argparse
 import functools
+import glob
 import json
 import os
+import signal
+import socket
 import subprocess
 import sys
 import time
@@ -31,7 +41,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import yaml  # type: ignore
 
-from metaos_pipeline import admission, controller, readyset, reflect, slots, speculate
+from metaos_pipeline import admission, controller, readyset, reflect, runner, slots, speculate
 from metaos_pipeline import ledger as record
 from metaos_pipeline.ledger import Ledger, usage_delta
 
@@ -190,6 +200,13 @@ def cost(row: dict) -> float:
 
 # ---------------------------------------------------------------- plan
 def cmd_plan(cfg: dict, led: Ledger, out_path: str | None) -> int:
+    plan = plan_pass(cfg, led)
+    emit(json.dumps(plan, indent=1), out_path)
+    return 2 if plan.get("refused") else 0
+
+
+def plan_pass(cfg: dict, led: Ledger, now: float | None = None) -> dict:
+    """One plan phase; its document (with `refused` when the admission gate refused the plan)."""
     reg = cfg.get("regulator") or {}
     defaults = {"N": int(reg.get("N0", 3)), "tick": 0, "paused": [], "spent": 0.0,
                 "calibration": dict(cfg.get("calibration") or {}),
@@ -202,7 +219,7 @@ def cmd_plan(cfg: dict, led: Ledger, out_path: str | None) -> int:
         slots.check_invariant(lanes, state.get("sessions"))
         rows, hist = slots.run_rows(lanes), slots.history_rows(lanes)
         n_lanes = int(cfg.get("_swarm_lanes", DEFAULT_LANES))
-        now = time.time()
+        now = now or time.time()
         tick = int(state["tick"]) + 1
         hours = ((now - state["last_tick_ts"]) / 3600.0) if state.get("last_tick_ts") else float(cfg.get("tick_hours", 1.0))
         hours = max(hours, 1e-3)
@@ -239,8 +256,7 @@ def cmd_plan(cfg: dict, led: Ledger, out_path: str | None) -> int:
                                   planner_order=planner_order(cfg))
         except admission.Refused as exc:
             led.run({"phase": "plan", "tick": tick, "ts": now, "refused": str(exc)})
-            emit(json.dumps({"tick": tick, "ts": now, "refused": str(exc)}, indent=1), out_path)
-            return 2
+            return {"tick": tick, "ts": now, "refused": str(exc)}
         if note:
             led.event("slot_record_reset", reason=note)
         lanes = slots.ensure(lanes, n_lanes, led.event)
@@ -351,8 +367,7 @@ def cmd_plan(cfg: dict, led: Ledger, out_path: str | None) -> int:
         if led.remote:  # the record keeps the plan without its prompts: an item is named by item_ref
             led.write_pass_file("plan", tick, now, {**plan, "spawn": [{k: v for k, v in s.items() if k != "prompt"} for s in spawn],
                                                     "spec_spawn": [{k: v for k, v in s.items() if k != "prompt"} for s in spec_spawn]})
-    emit(json.dumps(plan, indent=1), out_path)
-    return 0
+    return plan
 
 
 # ---------------------------------------------------------------- record
@@ -360,12 +375,23 @@ def backlog(cfg: dict, *args: str) -> tuple[int, str]:
     cli = cfg.get("backlog_cli")
     if not cli:
         return 0, "no backlog_cli configured (dry run)"
+    # A replayed record phase must not repeat a transition: the vault's status decides.
+    if args[:1] == ("transition",) and len(args) >= 3 and vault_status(cfg["vault"], args[1]) == args[2]:
+        return 0, f"{args[1]} is already {args[2]}: not transitioned again"
     # The backlog CLI finds the vault through METAOS_VAULT. The second name is a deprecated
     # alias, still exported so an instance CLI that reads it keeps working; drop it once
     # every instance CLI reads METAOS_VAULT.
     env = dict(os.environ, METAOS_VAULT=cfg["vault"], MOVA_VAULT=cfg["vault"])
     r = subprocess.run([sys.executable, cli, *args], cwd=cfg["vault"], env=env, capture_output=True, text=True, timeout=120)
     return r.returncode, (r.stdout + r.stderr).strip()
+
+
+def vault_status(vault: str, key: str) -> str | None:
+    """The item's status in the vault now (its file carries its id), or None when it is not found."""
+    for tier in ("raw", "wiki", "output"):
+        for path in glob.glob(os.path.join(glob.escape(vault), "*", tier, glob.escape(key) + ".md")):
+            return str(readyset.front_matter(path).get("status") or "") or None
+    return None
 
 
 def vault_commit(cfg: dict, message: str) -> str:
@@ -396,7 +422,23 @@ def vault_commit(cfg: dict, message: str) -> str:
 def cmd_record(cfg: dict, led: Ledger, results_path: str) -> int:
     with open(results_path, encoding="utf-8") as fh:
         res = json.load(fh)
-    now = time.time()
+    out = record_pass(cfg, led, res)
+    out["vault"] = record_vault(cfg, out)
+    print(json.dumps(out, indent=1))
+    return 0
+
+
+def record_vault(cfg: dict, out: dict) -> str:
+    """Commit the vault after a record phase that transitioned something."""
+    if not out["transitions"]:
+        return "no transitions"
+    msg = "pipeline tick %s: %s" % (out["tick"], "; ".join(out["transitions"]))
+    return vault_commit(cfg, msg + "\n\nWritten by the autonomous pipeline's record step; lanes and usage in the instance ledger.")
+
+
+def record_pass(cfg: dict, led: Ledger, res: dict, now: float | None = None) -> dict:
+    """One record phase over the harness's (or the runner's) results; the tick, spend and transitions."""
+    now = now or time.time()
     transitions: list[str] = []
     with led.locked("record"):
         state = led.state({"N": 1, "tick": 0, "spent": 0.0})
@@ -432,6 +474,7 @@ def cmd_record(cfg: dict, led: Ledger, results_path: str) -> int:
                 continue
             run = slot["run"]
             if s.get("ok"):
+                run.update({k: s[k] for k in ("pid", "log") if s.get(k)})  # the runner's step process
                 slots.spawned(slot, s.get("session_id"), now, index)
                 led.event("lane_started", lane_id=slot["lane_id"], run_id=run["run_id"], session_id=s.get("session_id"), item=run.get("item"))
                 if run["kind"] == "work":
@@ -469,17 +512,18 @@ def cmd_record(cfg: dict, led: Ledger, results_path: str) -> int:
                 elif c.get("branch_pushed"):
                     outcome = "ended_no_pr"
                 else:
-                    outcome = "failed" if st == "failed" else "ended_empty"
+                    outcome = c.get("outcome") or ("failed" if st == "failed" else "ended_empty")
                     # Nothing was produced: hand the item back to the ready set (single writer),
                     # counting the attempt so a broken item cannot be retried forever.
                     if run.get("item"):
                         tries = int((state.get("retries") or {}).get(run["item"], 0)) + 1
                         rc, msg = backlog(cfg, "transition", run["item"], "REFINED")
-                        led.event("transition", item=run["item"], to="REFINED", rc=rc, msg=msg[-200:])
+                        led.event("transition", item=run["item"], to="REFINED", rc=rc, msg=msg[-200:], reason=c.get("reason"))
                         if rc == 0:
-                            transitions.append(f"{run['item']} → REFINED (lane {slot['lane_id']} {outcome}; retry {tries})")
+                            transitions.append(f"{run['item']} → REFINED (lane {slot['lane_id']} {outcome}; retry {tries}"
+                                               + (f"; {c['reason']}" if c.get("reason") else "") + ")")
                         state.setdefault("retries", {})[run["item"]] = tries
-                end(slot, outcome, pr)
+                end(slot, outcome, pr, **({"reason": c["reason"]} if c.get("reason") else {}))
         for lid in res.get("interrupted") or []:
             slot = current({"lane_id": lid})
             if slot:
@@ -496,10 +540,7 @@ def cmd_record(cfg: dict, led: Ledger, results_path: str) -> int:
                  "transitions": transitions, "n_checks": len(res.get("checks") or []),
                  "n_spawned_ok": len([s for s in (res.get("spawned") or []) if s.get("ok")]),
                  **({"slot_record": note} if note else {})})
-    msg = "pipeline tick %s: %s" % (state.get("tick"), "; ".join(transitions) if transitions else "no transitions")
-    out = vault_commit(cfg, msg + "\n\nWritten by the autonomous pipeline's record step; lanes and usage in the instance ledger.") if transitions else "no transitions"
-    print(json.dumps({"tick": state.get("tick"), "spent": round(spent, 3), "transitions": transitions, "vault": out}, indent=1))
-    return 0
+    return {"tick": state.get("tick"), "spent": round(spent, 3), "transitions": transitions}
 
 
 # ---------------------------------------------------------------- report
@@ -572,6 +613,36 @@ def cmd_report(cfg: dict, led: Ledger, out_path: str | None) -> int:
     return 0
 
 
+# ---------------------------------------------------------------- run, control
+def cmd_run(cfg: dict, led: Ledger, inbox: str, work: str | None) -> int:
+    swarm = cfg["_swarm"]
+    r = runner.Runner(cfg, led, os.path.abspath(inbox), os.path.abspath(work or os.path.join(os.path.dirname(os.path.abspath(inbox)), "runner-work")),
+                      plan=plan_pass, record=record_pass, vault=record_vault,
+                      stall_minutes=float(swarm.get("stall_minutes", runner.STALL_MINUTES)))
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, r.stop)  # finish the pass in progress, release the lease, exit
+    return r.run()
+
+
+def cmd_control(cfg: dict, led: Ledger, a: argparse.Namespace) -> int:
+    """`control lease take`: move the lease to this host (human only); its runner takes it at its next start."""
+    with led.locked("control"):
+        state = led.state()
+        old = state.get("loop") or {}
+        state["loop"] = {"holder": None, "host": socket.gethostname(), "pid": None, "started": time.time(),
+                         "epoch": int(old.get("epoch") or 0) + 1}
+        led.event("lease_moved", by="control", **{"from": old.get("host")}, to=state["loop"]["host"],
+                  epoch=state["loop"]["epoch"], reason=a.reason)
+        led.save_state(state)
+    print(json.dumps({"lease": state["loop"]}, indent=1))
+    return 0
+
+
+def lease_holder(led: Ledger) -> dict | None:
+    loop = led.state().get("loop") or {}
+    return loop if loop.get("holder") else None
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", required=True)
@@ -581,13 +652,26 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("plan"); p.add_argument("--out")
     r = sub.add_parser("record"); r.add_argument("--results", required=True)
     q = sub.add_parser("report"); q.add_argument("--out")
+    u = sub.add_parser("run"); u.add_argument("--inbox", required=True); u.add_argument("--work")
+    c = sub.add_parser("control"); c.add_argument("target", choices=["lease"]); c.add_argument("action", choices=["take"])
+    c.add_argument("--reason", required=True)
     a = ap.parse_args(argv)
     cfg = load_config(a.config)
     cfg["_config_path"] = os.path.abspath(a.config)
-    cfg["_swarm_lanes"] = swarm_lanes(load_estate(cfg, a.metaos_config)[1])
+    estate = load_estate(cfg, a.metaos_config)[1]
+    cfg["_swarm_lanes"] = swarm_lanes(estate)
+    cfg["_swarm"] = estate.get("swarm") or {}
     try:
         led = open_ledger(cfg, a.state, a.metaos_config)
         print(f"tick {a.cmd}: record in {led.describe()}", file=sys.stderr)
+        if a.cmd in ("plan", "record") and lease_holder(led):
+            held = lease_holder(led)
+            raise SystemExit(f"tick: {a.cmd} refused: the runner {held['holder']} on {held.get('host')} holds the lease, "
+                             "and it alone runs passes")
+        if a.cmd == "run":
+            return cmd_run(cfg, led, a.inbox, a.work)
+        if a.cmd == "control":
+            return cmd_control(cfg, led, a)
         if a.cmd == "plan":
             return led.replay(lambda: cmd_plan(cfg, led, a.out))
         if a.cmd == "record":

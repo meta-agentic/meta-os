@@ -22,4 +22,6 @@ observe steps and remotes and only write events to the runner's inbox.
 | `events.py` | The runner's inbox: the event file format, its one atomic writer, `list_events`, the `emit` CLI, the one-shot window reset. |
 | `step_wrap.py` | Runs one step; writes `rate_limit` and `step_exit` events from what it reports, never changing its exit code. |
 | `remote_watch.py` | The one poll: conditional (ETag) GitHub requests; a changed answer writes one `remote_change` event. |
+| `runner.py` | The event-driven runner: the lease, the blocking wait on the inbox, one pass per batch of events, step processes under `step_wrap`, quiet timers, the rate-limit hold, restart adoption, the supervisor step command. It executes, so it sits beside the producers. |
+| `fake_engine.py` | The dry-run harness: a fake step engine (scripted exits, progress, rate-limit lines) and a scripted step command. |
 | `ledger.py` | The record: atomic state, materialised lanes, append-only events / runs / reflections, a directory lock, `schema` versions; over the record repository's clone, fetch-before-write, one commit per phase that changed something and a replay on a rejected push. |

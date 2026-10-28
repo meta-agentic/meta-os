@@ -200,15 +200,24 @@ class _Clone:
         except LedgerError as exc:
             raise LedgerError(f"record push pending, retried and failed again; the next run retries: {exc}") from None
 
-    def commit_and_push(self, message: str) -> str | None:
+    def commit_and_push(self, message: str, amend: bool = False) -> str | None:
         self._run("add", "-A")
-        if not self._run("status", "--porcelain").stdout.strip():
+        if not amend and not self._run("status", "--porcelain").stdout.strip():
             return None
-        c = self._run("commit", "-q", "-m", message)
+        c = self._run("commit", "-q", *(["--amend"] if amend else []), "-m", message)
         if c.returncode != 0:
             raise LedgerError(f"record commit failed: {(c.stdout + c.stderr).strip()[-300:]}")
         self._push()
         return self._run("rev-parse", "HEAD").stdout.strip()
+
+    def checkpoint(self, message: str) -> bool:
+        """Commit what the phase wrote so far, locally and unpushed; False when nothing changed."""
+        self._run("add", "-A")
+        if not self._run("status", "--porcelain").stdout.strip():
+            return False
+        if self._run("commit", "-q", "-m", message).returncode != 0:
+            raise LedgerError(f"record checkpoint failed in {self.path}")
+        return True
 
     def discard_uncommitted(self) -> None:
         self._run("reset", "-q", "--hard")
@@ -237,6 +246,8 @@ class Ledger:
         # In a clone the lock lives under .git, so it is never part of the record.
         self.lock_path = os.path.join(state_dir, ".git" if remote else "", "ledger.lock" if remote else ".lock")
         self._synced = not remote
+        self._depth = 0
+        self._checkpointed = False
         self._lanes_before: dict[str, str] | None = None
         self._lanes_after: dict[str, str] = {}
         self._pass: Any = None
@@ -252,8 +263,13 @@ class Ledger:
 
         A clean exit of a named phase calls `commit_pass` with a message naming the pass, the phase
         and every lane it changed; it raises `PushRejected` when the remote moved (see `replay`).
-        A phase that fails leaves no uncommitted file behind.
+        A phase that fails leaves no uncommitted file behind, but keeps a `checkpoint` commit.
+        A phase entered while one is held (the runner's pass around `plan` and `record`) is part
+        of it: no second fetch, no commit of its own.
         """
+        if self._depth:
+            yield
+            return
         with open(self.lock_path, "w") as fh:
             fcntl.flock(fh, fcntl.LOCK_EX)
             try:
@@ -261,6 +277,7 @@ class Ledger:
                     self._clone.sync()
                     self._synced = True
                 self._lanes_before, self._lanes_after, self._pass = None, {}, None
+                self._depth, self._checkpointed = 1, False
                 try:
                     yield
                 except BaseException:
@@ -276,6 +293,7 @@ class Ledger:
                         raise
             finally:
                 self._synced = not self._clone
+                self._depth = 0
                 fcntl.flock(fh, fcntl.LOCK_UN)
 
     def _writable(self) -> None:
@@ -285,7 +303,17 @@ class Ledger:
     def commit_pass(self, message: str) -> str | None:
         """Commit and push what the phase changed, at once; a no-op (None) when nothing changed or no clone."""
         self._writable()
-        return self._clone.commit_and_push(message) if self._clone else None
+        return self._clone.commit_and_push(message, amend=self._checkpointed) if self._clone else None
+
+    def checkpoint(self, message: str) -> None:
+        """Make what the phase wrote so far durable before a side effect (a process start).
+
+        In a clone, a local commit the phase's own commit then amends, so the pass still pushes
+        one commit; a runner killed before that finds it unpushed and the next phase pushes it.
+        """
+        self._writable()
+        if self._clone and self._clone.checkpoint(message):
+            self._checkpointed = True
 
     def replay(self, phase: Callable[[], Any], attempts: int = 3) -> Any:
         """Run a phase; on a non-fast-forward push drop its local commit and run it again from the new state."""

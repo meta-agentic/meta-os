@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The pipeline runner as a launchd agent. A template: the instance fills every __PLACEHOLDER__
+  and installs the result under ~/Library/LaunchAgents; the framework installs nothing.
+
+    __LABEL__          the agent's label, reverse-DNS, unique on the machine
+    __PYTHON__         the interpreter (with PyYAML)
+    __PIPELINE__       the framework's pipeline/ directory
+    __CONFIG__         the instance's pipeline configuration file
+    __INBOX__          the runner's inbox directory, outside the record clone's tracked tree
+    __LOG_DIR__        where the runner's stdout and stderr go
+
+  KeepAlive restarts a runner that crashed (a non-zero exit). A runner that lost the lease, or was
+  stopped cleanly, exits 0 and stays down: a second runner, or a lease moved to another host by
+  `tick.py control lease take`, never restart-loops.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>__LABEL__</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__PYTHON__</string>
+    <string>__PIPELINE__/tick.py</string>
+    <string>--config</string>
+    <string>__CONFIG__</string>
+    <string>run</string>
+    <string>--inbox</string>
+    <string>__INBOX__</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>__LOG_DIR__/runner.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>__LOG_DIR__/runner.err.log</string>
+</dict>
+</plist>

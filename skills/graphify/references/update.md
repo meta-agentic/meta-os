@@ -12,9 +12,20 @@ import sys, json
 from graphify.detect import detect_incremental, save_manifest
 from pathlib import Path
 
-result = detect_incremental(Path('INPUT_PATH'))
+from graphify.paths import out_path
+from graphify.watch import _read_build_excludes, _read_build_gitignore
+result = detect_incremental(Path('INPUT_PATH'), extra_excludes=_read_build_excludes(out_path()), gitignore=_read_build_gitignore(out_path()))
 new_total = result.get('new_total', 0)
-print(json.dumps(result, indent=2, ensure_ascii=False))
+nf = result.get('new_files', {})
+print(json.dumps({
+    'new_total': new_total,
+    'deleted': len(result.get('deleted_files', [])),
+    'new_by_type': {t: len(v) for t, v in nf.items()},
+    'total_files': result.get('total_files'),
+    'total_words': result.get('total_words'),
+    'skipped_sensitive': result.get('skipped_sensitive', []),
+}, indent=2, ensure_ascii=False))
+print('Full result: graphify-out/.graphify_incremental.json')
 Path('graphify-out/.graphify_incremental.json').write_text(json.dumps(result, ensure_ascii=False), encoding=\"utf-8\")
 deleted = list(result.get('deleted_files', []))
 if new_total == 0 and not deleted:
@@ -61,7 +72,7 @@ print('code_only:', code_only)
 "
 ```
 
-If `code_only` is True: print `[graphify update] Code-only changes detected - skipping semantic extraction (no LLM needed)`, run only Step 3A (AST) on the changed files, skip Step 3B entirely (no subagents), then go straight to merge and Steps 4–8.
+If `code_only` is True: print `[graphify update] Code-only changes detected - skipping semantic extraction (no LLM needed)`, run Step 3A (AST) on the changed files, then follow only Part B's **Fast path** to overwrite `.graphify_semantic.json` with an empty result and run Part C to create `.graphify_extract.json` from the fresh AST result. Skip semantic cache checks/writes and subagents (Steps B0–B3); do not reuse semantic sidecars from a prior run. Continue to the incremental merge and Steps 4–8 only after Part C has completed.
 
 If `code_only` is False (any changed file is a doc/paper/image/video): **first, if any changed file is in `new_files['video']`, run `references/transcribe.md` (Step 2.5) on those files, then rewrite `.graphify_detect.json` to move the resulting transcript paths into `files['document']` and drop `files['video']`** — otherwise raw `.mp4/.mp3` paths are fed to semantic subagents as unreadable media (#1392). Then run the full Steps 3A–3C pipeline as normal.
 
@@ -96,7 +107,7 @@ deleted = list(incremental.get('deleted_files', []))
 # prune_sources is ONLY for genuinely DELETED files. Changed/re-extracted files are
 # handled by build_merge's replace-on-re-extract (#1344): every source_file in
 # new_chunks is dropped from the base before merge, so old/stale nodes don't survive.
-# Do NOT add `changed` here: with root= passed, prune_set relativizes to the same base
+# Do NOT add changed here: with root= passed, prune_set relativizes to the same base
 # as the freshly merged nodes and would DELETE the re-extracted content (#1178 is moot
 # now that replace — not the dedup pass — reconciles changed files).
 prune = list(deleted) or None
@@ -142,7 +153,25 @@ print(f'[graphify update] Merged extraction written ({len(merged_out[\"nodes\"])
 # root= matches the build_merge call above so the manifest keys stay relative to
 # the scan root — portable across clones/machines, so --update keeps matching
 # cached files instead of missing every one after a move (#1417).
-save_manifest(incremental['files'], root='INPUT_PATH')
+#
+# Only stamp semantic files (docs/papers/images) that ACTUALLY produced output
+# THIS run (new_extraction is this run's fresh extraction, read above before the
+# merge overwrote the file): a changed doc whose chunk failed must stay unstamped
+# so the next --update re-queues it, otherwise it is marked done and its content
+# is lost forever (#2015). Mirrors the library extract path
+# (cli._stamped_manifest_files + clear_semantic + scan_corpus).
+from graphify.cli import _stamped_manifest_files
+_manifest_files = _stamped_manifest_files(incremental['files'], new_extraction, Path('INPUT_PATH'))
+# Changed semantic files dispatched this run but NOT stamped had their chunk fail
+# or be omitted; clear any stale semantic_hash so they are re-queued (#1948).
+_sem_types = ('document', 'paper', 'image')
+_dispatched = {f for t, fl in incremental.get('new_files', {}).items() if t in _sem_types for f in fl}
+_stamped = {f for fl in _manifest_files.values() for f in fl}
+_cleared = _dispatched - _stamped
+# scan_corpus = the RAW full corpus so in-root files newly excluded since last run
+# are dropped rather than masquerading as deletions; untouched rows preserved (#1908).
+_scan = {f for fl in incremental['files'].values() for f in fl}
+save_manifest(_manifest_files, root='INPUT_PATH', scan_corpus=_scan, clear_semantic=_cleared or None)
 print('[graphify update] Manifest saved.')
 "
 ```
@@ -156,7 +185,7 @@ $(cat graphify-out/.graphify_python) -c "
 import json
 from graphify.analyze import graph_diff
 from graphify.build import build_from_json
-from networkx.readwrite import json_graph
+from graphify.paths import load_node_link_graph
 import networkx as nx
 from pathlib import Path
 
@@ -166,7 +195,7 @@ new_extract = json.loads(Path('graphify-out/.graphify_extract.json').read_text(e
 G_new = build_from_json(new_extract, directed=IS_DIRECTED)
 
 if old_data:
-    G_old = json_graph.node_link_graph(old_data, edges='links')
+    G_old = load_node_link_graph(old_data)
     diff = graph_diff(G_old, G_new)
     print(diff['summary'])
     if diff['new_nodes']:

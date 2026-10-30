@@ -62,21 +62,82 @@ def provided_skills(registry: Path) -> tuple[dict[str, str], list[str]]:
     return out, problems
 
 
-def registry_paths(registry: Path) -> dict[str, str]:
-    """Each registry key (and each key it used to have, `renamed-from:`) -> the pack's directory
-    inside its repository, for a pack that lives in a subdirectory of a bigger one. Best effort:
-    `provided_skills` already reports an unreadable registry, so here it just yields nothing."""
+def _norm_url(url: str) -> str:
+    return re.sub(r"\.git$", "", url.rstrip("/")).replace("git@github.com:", "https://github.com/")
+
+
+def _plain_path(path: object) -> str | None:
+    """The shell's rule (packs.sh pack_subpath): a relative directory, no `..`, no empty segment."""
+    if not isinstance(path, str):
+        return None
+    sub = path.strip("/")
+    if sub and (any(seg in ("", "..") for seg in sub.split("/"))):
+        return None
+    return sub or None
+
+
+def _mount_urls(gitmodules: Path | None) -> dict[str, str]:
+    """`.packs/<name>` -> the url its submodule was added from, from a .gitmodules file."""
+    if gitmodules is None or not gitmodules.is_file():
+        return {}
+    out: dict[str, str] = {}
+    for block in re.split(r"(?m)^\[submodule ", gitmodules.read_text(encoding="utf-8", errors="replace"))[1:]:
+        path = re.search(r"(?m)^\s*path\s*=\s*(\S+)", block)
+        url = re.search(r"(?m)^\s*url\s*=\s*(\S+)", block)
+        if path and url:
+            out[path.group(1)] = url.group(1)
+    return out
+
+
+def registry_paths(registry: Path, manifest: Path | None = None,
+                   gitmodules: Path | None = None) -> tuple[dict[str, str], list[str]]:
+    """Each pack key -> the pack's directory inside its mount, and the problems with a path.
+
+    As `packs.sh` reads it: the manifest's `path:` wins; otherwise the registry's applies, to the
+    key and to each key it used to have (`renamed-from:`), unless the mount was made from another
+    repository than the registry's (an instance mounted before the monorepo): then it is the whole
+    pack. A path with `..` or an empty segment is a problem and gives no entry. A registry that
+    cannot be read yields nothing here: `provided_skills` reports that.
+    """
+    problems: list[str] = []
     try:
         packs = (yaml.safe_load(registry.read_text(encoding="utf-8")) or {}).get("packs")
     except (OSError, yaml.YAMLError, AttributeError):
-        return {}
+        return {}, problems
+    declared: dict[str, str] = {}
+    if manifest is not None and manifest.is_file():
+        try:
+            mp = (yaml.safe_load(manifest.read_text(encoding="utf-8")) or {}).get("packs") or {}
+        except (OSError, yaml.YAMLError, AttributeError):
+            mp = {}
+        for name, entry in (mp.items() if isinstance(mp, dict) else []):
+            if isinstance(entry, dict) and entry.get("path") is not None:
+                declared[str(name)] = entry["path"]
+    urls = _mount_urls(gitmodules)
     out: dict[str, str] = {}
+    bad: set[str] = set()
+    for name, raw in declared.items():
+        sub = _plain_path(raw)
+        if sub is None:
+            problems.append(f"pack {name!r}: path {raw!r} must be a plain relative directory")
+            bad.add(name)
+        else:
+            out[name] = sub
     for pack, entry in (packs.items() if isinstance(packs, dict) else []):
-        path = entry.get("path") if isinstance(entry, dict) else None
-        if isinstance(path, str) and path.strip("/"):
-            for key in [str(pack), *(str(k) for k in entry.get("renamed-from") or [])]:
-                out[key] = path.strip("/")
-    return out
+        if not isinstance(entry, dict) or entry.get("path") is None:
+            continue
+        sub = _plain_path(entry["path"])
+        if sub is None:
+            problems.append(f"pack {pack!r}: registry path {entry['path']!r} must be a plain relative directory")
+            continue
+        for key in [str(pack), *(str(k) for k in entry.get("renamed-from") or [])]:
+            if key in out or key in bad:
+                continue                                       # the manifest's own path wins
+            src = urls.get(f".packs/{key}")
+            if src is not None and _norm_url(src) != _norm_url(str(entry.get("repo") or "")):
+                continue                                       # mounted from another repository: the whole pack
+            out[key] = sub
+    return out, problems
 
 
 def mounted_packs(packs_dir: Path, subpaths: dict[str, str] | None = None) -> dict[str, set[str]]:

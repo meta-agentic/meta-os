@@ -486,7 +486,9 @@ def check_index_resolves(findings: list[Finding]) -> dict[str, str]:
     if SKILLS_INDEX.is_file():
         findings.extend(Finding("index-pack-table", "skills/_index.md", p)
                         for p in pack_table(SKILLS_INDEX.read_text(encoding="utf-8"))[1])
-    mounted, pack_provided = mounted_packs(PACKS_DIR, registry_paths(PACKS_REGISTRY)), {}
+    paths, path_problems = registry_paths(PACKS_REGISTRY, ROOT / ".packs.yaml", ROOT / ".gitmodules")
+    findings.extend(Finding("pack-registry", "systems/packs.yaml", p) for p in path_problems)
+    mounted, pack_provided = mounted_packs(PACKS_DIR, paths), {}
     on_disk |= set().union(*mounted.values())
     for name in sorted(index_entries()):
         pack = provided.get(name)

@@ -100,6 +100,13 @@ class MonorepoTest(PacksShFixture):
         r = self.packs("add", "disc-b", check=False)
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("plugins/not-there is not in", r.stderr)
+        self.assertFalse((self.inst / ".packs" / "disc-b").exists(), "the half-added mount was taken back out")
+        self.assertEqual(git(self.inst, "submodule", "status").strip(), "")
+        gm = self.inst / ".gitmodules"
+        self.assertTrue(not gm.exists() or "disc-b" not in gm.read_text())
+        self.assertFalse((self.inst / ".packs.yaml").exists() and "disc-b" in (self.inst / ".packs.yaml").read_text())
+        self.registry()
+        self.assertEqual(self.packs("add", "disc-b").returncode, 0, "a corrected path adds cleanly afterwards")
 
     def test_a_path_that_climbs_out_of_the_mount_is_refused(self):
         self.write_manifest(f"  disc-a:\n    repo: {self.mono}\n    path: ../../etc\n")
@@ -177,6 +184,86 @@ class MonorepoTest(PacksShFixture):
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("both 'old-a' and 'disc-a'", r.stderr)
         self.assertIn("  old-a:", (self.inst / ".packs.yaml").read_text(), "nothing was rewritten")
+
+    # --- an instance mounted before the monorepo, from the pack's own repository --------
+
+    def whole_repo(self) -> str:
+        repo = self.tmp / "src" / "old-whole-a"
+        for sk in ("a-one", "a-two"):
+            (repo / "skills" / sk).mkdir(parents=True)
+            (repo / "skills" / sk / "SKILL.md").write_text(f"---\nname: {sk}\n---\n")
+        (repo / "pack.yaml").write_text(self.pack_yaml("disc-a"))
+        git(repo, "init", "-q", "-b", "main")
+        git(repo, "add", ".")
+        git(repo, "commit", "-q", "-m", "init")
+        return str(repo)
+
+    def old_whole_instance(self) -> str:
+        url = self.whole_repo()
+        self.write_manifest(f"  old-a:\n    repo: {url}\n    config:\n      profile: full\n")
+        self.packs("apply")
+        git(self.inst, "add", ".gitmodules", ".packs", ".packs.yaml")
+        git(self.inst, "commit", "-q", "-m", "mount")
+        return url
+
+    def test_a_mount_made_from_the_packs_own_repository_is_the_whole_pack_not_the_registry_path(self):
+        self.old_whole_instance()
+        r = self.packs("check")
+        self.assertIn("check: mounts match", r.stdout)
+        self.assertEqual(self.links()["a-one"], "../.packs/old-a/skills/a-one")
+        self.assertEqual(self.packs("config", "old-a", "profile").stdout.strip(), "full")
+
+    def test_migrate_moves_such_a_mount_by_key_and_says_it_is_still_the_old_repository(self):
+        url = self.old_whole_instance()
+        r = self.packs("migrate")
+        self.assertIn("migrate: old-a -> disc-a", r.stdout)
+        self.assertIn("still mounted from " + url, r.stderr)
+        self.assertEqual(self.links()["a-one"], "../.packs/disc-a/skills/a-one", "still the whole pack, under the new key")
+        git(self.inst, "add", "-A", ".gitmodules", ".packs", ".packs.yaml")
+        git(self.inst, "commit", "-q", "-m", "migrated")
+        self.assertIn("check: mounts match", self.packs("check").stdout)
+        self.assertIn("state matches", self.packs("apply").stdout)
+
+    def test_an_explicit_manifest_path_applies_to_any_mount(self):
+        url = self.whole_repo()
+        self.write_manifest(f"  disc-a:\n    repo: {url}\n    path: nowhere\n")
+        r = self.packs("apply", check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("nowhere is not in", r.stderr, "the manifest's path applies although the mount is not the registry's repository")
+
+    # --- migrate is safe to fail and to re-run -------------------------------------------
+
+    def test_a_failed_move_leaves_the_manifest_alone_and_the_rerun_completes(self):
+        self.old_instance()
+        before = (self.inst / ".packs.yaml").read_text()
+        lock = self.inst / ".git" / "index.lock"
+        lock.write_text("")
+        r = self.packs("migrate", check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual((self.inst / ".packs.yaml").read_text(), before, "the manifest is rewritten last")
+        self.assertTrue((self.inst / ".packs" / "old-a").exists())
+        self.assertFalse((self.inst / ".packs" / "disc-a").exists())
+        lock.unlink()
+        self.assertIn("migrate: old-a -> disc-a", self.packs("migrate").stdout)
+        self.assertIn("  disc-a:", (self.inst / ".packs.yaml").read_text())
+
+    def test_a_rerun_after_the_mount_moved_but_the_manifest_did_not_finishes_the_manifest(self):
+        self.old_instance()
+        git(self.inst, "mv", ".packs/old-a", ".packs/disc-a")
+        out = self.packs("migrate").stdout
+        self.assertIn("migrate: old-a -> disc-a", out)
+        self.assertIn("  disc-a:", (self.inst / ".packs.yaml").read_text())
+        self.assertNotIn("old-a:", (self.inst / ".packs.yaml").read_text())
+
+    def test_remove_after_a_migrate_drops_the_module_gitdir_it_was_added_under(self):
+        self.old_instance()
+        self.packs("migrate")
+        git(self.inst, "add", "-A", ".gitmodules", ".packs", ".packs.yaml")
+        git(self.inst, "commit", "-q", "-m", "migrated")
+        gitdir = self.inst / ".git" / "modules" / ".packs" / "old-a"
+        self.assertTrue(gitdir.exists())
+        self.packs("remove", "disc-a")
+        self.assertFalse(gitdir.exists(), "the gitdir keeps the name the submodule was added under")
 
     def test_every_old_spelling_of_a_pack_is_found(self):
         self.write_manifest(f"  older-b:\n    repo: {self.mono}\n")

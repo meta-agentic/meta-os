@@ -95,8 +95,28 @@ manifest_field() { # <name> <field> → that field of the pack's entry (repo, in
 }
 # Where a pack's own tree is: .packs/<name>, or .packs/<name>/<path> for a pack that lives in
 # a subdirectory of its repository (the manifest's `path:` wins over the registry's).
+norm_url() { printf '%s' "${1%/}" | sed -e 's|\.git$||' -e 's|^git@github\.com:|https://github.com/|'; }
+submodule_key() { # <name> → the submodule's name in .gitmodules (it keeps the name it was added under when `migrate` moves the path)
+  [ -f .gitmodules ] || return 0
+  git config -f .gitmodules --get-regexp '^submodule\..*\.path$' 2>/dev/null \
+    | awk -v p=".packs/$1" '$2 == p { print $1 }' | sed -e 's/^submodule\.//' -e 's/\.path$//' | head -1
+}
+mount_url() { # <name> → the repository the mount was made from: .gitmodules, else the manifest's repo:
+  local k u; k=$(submodule_key "$1")
+  [ -z "$k" ] || u=$(git config -f .gitmodules "submodule.$k.url" 2>/dev/null || true)
+  echo "${u:-$(manifest_field "$1" repo)}"
+}
+# The registry's path: describes the registry's repository. A mount made from another one (an
+# instance mounted before the monorepo, from the pack's own repository) is the whole pack.
 pack_subpath() { # <name> → the path inside the mount, empty for a whole-repository pack
-  local sub; sub=$(manifest_field "$1" path); [ -n "$sub" ] || sub=$(registry_field "$1" path)
+  local sub src reg; sub=$(manifest_field "$1" path)
+  if [ -z "$sub" ]; then
+    sub=$(registry_field "$1" path)
+    if [ -n "$sub" ]; then
+      src=$(mount_url "$1"); reg=$(registry_field "$1" repo)
+      if [ -n "$src" ] && [ "$(norm_url "$src")" != "$(norm_url "$reg")" ]; then sub=""; fi
+    fi
+  fi
   sub="${sub#/}"; sub="${sub%/}"
   if [ -n "$sub" ]; then case "/$sub/" in */../*|*//*) die "pack '$1': path '$sub' must be a plain relative directory" ;; esac; fi
   echo "$sub"
@@ -426,9 +446,19 @@ sync_claude() {
 # (cone mode keeps the repository's top-level files). Best effort: a git without sparse-checkout
 # gets the whole tree, which only costs space; the pack is read from the same path either way.
 sparse_pack() { # <name>
-  local sub; sub=$(pack_subpath "$1")
+  local sub err; sub=$(pack_subpath "$1")
   [ -n "$sub" ] && [ -e ".packs/$1/.git" ] || return 0
-  git -C ".packs/$1" sparse-checkout set --cone "$sub" >/dev/null 2>&1 || true
+  local rc=0; git sparse-checkout -h >/dev/null 2>&1 || rc=$?
+  [ "$rc" = 129 ] || return 0                                             # a git without sparse-checkout: the whole tree
+  err=$(git -C ".packs/$1" sparse-checkout set --cone -- "$sub" 2>&1) \
+    || echo "warn: pack '$1': sparse checkout of $sub failed (the whole tree is checked out): $(printf '%s' "$err" | tail -n 1)" >&2
+}
+# Take a submodule that was just added back out, so a refused add leaves nothing recorded.
+unmount_half() { # <name>
+  local gd; gd=$(git rev-parse --git-path "modules/$(submodule_key "$1" || echo ".packs/$1")")
+  git submodule deinit -f ".packs/$1" >/dev/null 2>&1 || true
+  git rm -f -q ".packs/$1" >/dev/null 2>&1 || true
+  rm -rf -- "$gd" ".packs/$1"
 }
 
 cmd_add() {
@@ -448,7 +478,11 @@ cmd_add() {
   fi
   git submodule add -f "$url" ".packs/$name"
   sparse_pack "$name"
-  [ -d "$(pack_dir "$name")" ] || die "pack '$name': $(pack_subpath "$name") is not in $url — the registry's (or the manifest's) path is wrong"
+  if [ ! -d "$(pack_dir "$name")" ]; then
+    local sub; sub=$(pack_subpath "$name")
+    unmount_half "$name"
+    die "pack '$name': $sub is not in $url — the registry's (or the manifest's) path is wrong; the mount was taken back out"
+  fi
   manifest_add "$name" "${2:-}"
   [ "$DEFER_SYNC" = 1 ] || cmd_sync
   echo "mounted. Review, then: git add .gitmodules .packs.yaml .packs/$name && git commit (the skills/ and .claude/ links are generated and excluded from git)"
@@ -464,7 +498,8 @@ cmd_remove() {
   fi
   # In a linked worktree .git is a file and the module gitdir lives under the worktree's own
   # gitdir; a leftover one would be reused, stale, by the next `add -f` of the same name.
-  local gd; gd=$(git rev-parse --git-path "modules/.packs/$name")
+  local gd; gd=$(git rev-parse --git-path "modules/$(submodule_key "$name" || true)")
+  [ -n "$(submodule_key "$name")" ] || gd=$(git rev-parse --git-path "modules/.packs/$name")
   git submodule deinit -f ".packs/$name"
   git rm -f ".packs/$name"
   rm -rf "$gd"
@@ -559,23 +594,35 @@ repoint_worktree() { # <new name>
 # guessed: a pack whose old and new keys both appear, or whose new mount path is taken, stops it.
 cmd_migrate() {
   [ -f "$MANIFEST" ] || die "migrate: there is no $MANIFEST here"
-  local old new moved=0
+  local old new moved=0 src reg resourced=""
   for old in $(manifest_names); do
     new=$(registry_name "$old"); [ "$new" != "$old" ] || continue
     manifest_names | grep -qx -- "$new" && die "migrate: both '$old' and '$new' are in $MANIFEST — merge the two entries by hand, then re-run"
-    { [ -e ".packs/$new" ] || [ -L ".packs/$new" ]; } && die "migrate: .packs/$new already exists — remove it, then re-run"
-    awk -v o="$old" -v n="$new" '$0 == "  " o ":" { print "  " n ":"; next } { print }' "$MANIFEST" > "$MANIFEST.tmp" && mv "$MANIFEST.tmp" "$MANIFEST"
-    if [ -n "$(git ls-files -s -- ".packs/$old" 2>/dev/null)" ]; then
-      git mv ".packs/$old" ".packs/$new"
-      repoint_worktree "$new"
-    elif [ -e ".packs/$old" ] || [ -L ".packs/$old" ]; then
-      mv ".packs/$old" ".packs/$new"
+    # The mount first, the manifest last: a failed move leaves the instance as it was, and a
+    # re-run after a move that did happen finds only the manifest left to rewrite.
+    if [ -e ".packs/$old" ] || [ -L ".packs/$old" ]; then
+      { [ -e ".packs/$new" ] || [ -L ".packs/$new" ]; } && die "migrate: both .packs/$old and .packs/$new exist — remove one, then re-run"
+      src=$(mount_url "$old"); reg=$(registry_field "$new" repo)
+      if [ -n "$(git ls-files -s -- ".packs/$old" 2>/dev/null)" ]; then
+        git mv ".packs/$old" ".packs/$new" || die "migrate: could not move .packs/$old to .packs/$new — nothing was changed; fix what git reports and re-run"
+        repoint_worktree "$new"
+      else
+        mv ".packs/$old" ".packs/$new" || die "migrate: could not move .packs/$old — nothing was changed"
+      fi
+      if [ -n "$src" ] && [ -n "$reg" ] && [ "$(norm_url "$src")" != "$(norm_url "$reg")" ]; then
+        resourced="$resourced $new"
+      fi
     fi
+    awk -v o="$old" -v n="$new" '$0 == "  " o ":" { print "  " n ":"; next } { print }' "$MANIFEST" > "$MANIFEST.tmp" && mv "$MANIFEST.tmp" "$MANIFEST"
     echo "migrate: $old -> $new"
     moved=$((moved + 1))
   done
   if [ "$moved" = 0 ]; then echo "migrate: nothing to do — every key in $MANIFEST is current"; return; fi
   cmd_sync
+  for new in $resourced; do
+    echo "note: $new is still mounted from $(mount_url "$new"), not from the registry's repository ($(registry_field "$new" repo));" \
+         "it keeps working as the whole pack. To move it: scripts/packs.sh remove $new, then scripts/packs.sh add $new (re-add its entry's config)" >&2
+  done
   echo "migrated $moved pack(s). Review, then: git add -A .gitmodules .packs .packs.yaml && git commit (the skills/ and .claude/ links are generated and excluded from git)"
 }
 

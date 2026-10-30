@@ -146,6 +146,24 @@ class IndexResolvesTest(unittest.TestCase):
         phantoms, _ = self.phantoms()
         self.assertEqual(phantoms, {"zeta"})
 
+    def test_the_manifest_path_wins_a_bad_path_is_a_problem_and_another_source_is_the_whole_pack(self):
+        from pack_registry import registry_paths   # imported late, as the gate does
+        self.monorepo()
+        manifest = self.tmp / ".packs.yaml"
+        manifest.write_text("packs:\n  mono-a:\n    path: plugins/mono-b\n  old-a:\n    path: ../x\n")
+        paths, problems = registry_paths(self.registry, manifest)
+        self.assertEqual(paths["mono-a"], "plugins/mono-b", "the manifest's path wins over the registry's")
+        self.assertEqual(len(problems), 1)
+        self.assertIn("'old-a'", problems[0])
+        self.assertNotIn("old-a", paths)
+        gm = self.tmp / ".gitmodules"
+        gm.write_text('[submodule ".packs/mono-a"]\n\tpath = .packs/mono-a\n\turl = https://example.invalid/the-old-repo\n')
+        manifest.write_text("packs:\n")
+        self.assertNotIn("mono-a", registry_paths(self.registry, manifest, gm)[0],
+                         "a mount from another repository is the whole pack")
+        gm.write_text('[submodule ".packs/mono-a"]\n\tpath = .packs/mono-a\n\turl = https://example.invalid/mono.git\n')
+        self.assertEqual(registry_paths(self.registry, manifest, gm)[0]["mono-a"], "plugins/mono-a")
+
     def test_an_uninitialised_submodule_is_not_a_mount(self):
         # what a CI checkout without `submodules:` holds: an empty .packs/<pack>/, no links
         (self.tmp / ".packs" / "agile").mkdir(parents=True)

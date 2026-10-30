@@ -6,6 +6,7 @@
     tick.py --config CFG [--state DIR] [--metaos-config FILE] report [--out report.md]
     tick.py --config CFG [--state DIR] [--metaos-config FILE] run    --inbox DIR [--work DIR]
     tick.py --config CFG [--state DIR] [--metaos-config FILE] control lease take --reason R
+    tick.py --config CFG [--state DIR] [--metaos-config FILE] start --dir D --commands F --sentinel-job LABEL -- LAUNCH...
 
 The record goes to the clone of `swarm.record_repository` when the estate config
 (`meta-os.config.json`, found above CFG or named by --metaos-config) sets it, and to the plain
@@ -27,7 +28,9 @@ the lease to this machine; a runner never takes a lease held on another host by 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import functools
+import io
 import glob
 import json
 import os
@@ -41,7 +44,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import yaml  # type: ignore
 
-from metaos_pipeline import admission, controller, readyset, reflect, runner, slots, speculate
+from metaos_pipeline import admission, controller, readyset, reflect, review, runner, slots, speculate, start, vaultlock
 from metaos_pipeline import ledger as record
 from metaos_pipeline.ledger import Ledger, usage_delta
 
@@ -107,6 +110,14 @@ def open_ledger(cfg: dict, state_dir: str | None, metaos_config: str | None) -> 
     record.check_not_nested(clone, os.path.dirname(cfg["_config_path"]),
                             bool((cfg.get("record_repository") or {}).get("allow_nested")))
     return Ledger(clone, remote=rr["url"])
+
+
+def review_sla_days(estate: dict) -> float:
+    """`swarm.review_sla_days`; a value that is not a non-negative number stops the run."""
+    d = (estate.get("swarm") or {}).get("review_sla_days", review.SLA_DAYS)
+    if not isinstance(d, (int, float)) or isinstance(d, bool) or d < 0:
+        raise SystemExit(f"tick: swarm.review_sla_days must be a non-negative number, not {d!r}")
+    return float(d)
 
 
 def visibility_probe(cfg: dict) -> tuple:
@@ -286,10 +297,22 @@ def plan_pass(cfg: dict, led: Ledger, now: float | None = None) -> dict:
         # ---- review-queue guard (reflection level 1): pause spaces whose pipeline output waits
         review_cap = int(cfg.get("review_cap_per_space", 4))
         paused: list[str] = []
+        paused_reasons: dict[str, str] = {}
         for space in (cfg.get("spaces") or {}):
             n_review = len([l for l in hist if l.get("space") == space and l.get("status") == "in_review"])
             if n_review >= review_cap:
                 paused.append(space)
+                paused_reasons[space] = f"{n_review} pipeline PRs in review, at the cap of {review_cap}"
+        # ---- review-age SLA: a space whose oldest item in review is over the limit takes no new work
+        spaces = list(cfg.get("spaces") or {})
+        waiting = review.queue(cfg["vault"], spaces, now)
+        sla = float(cfg.get("_review_sla_days", review.SLA_DAYS))
+        for space, why in review.over_sla(waiting, sla).items():
+            if space not in paused:
+                paused.append(space)
+                paused_reasons[space] = why
+        for space in paused:
+            print(f"tick plan: {space} takes no new work: {paused_reasons[space]}", file=sys.stderr)
 
         # ---- speculation first (it reserves its tokens), then work assignment
         spawn: list[dict] = []
@@ -358,7 +381,8 @@ def plan_pass(cfg: dict, led: Ledger, now: float | None = None) -> dict:
         led.save_lanes(lanes)
         plan = {"tick": tick, "ts": now, "N": N, "N_old": decision.N_old, "freeze": freeze, "burn_per_hour": round(burn, 3),
                 "setpoint_per_hour": round(target, 3), "rate_status": rate_status, "spent": round(spent, 3),
-                "ready_set": [i.id for i in ready], **adm.as_plan(), "paused_spaces": paused, "spawn": spawn, "spec_spawn": spec_spawn,
+                "ready_set": [i.id for i in ready], **adm.as_plan(), "paused_spaces": paused, "paused_reasons": paused_reasons,
+                "review_age_max_days": review.age_max_days(waiting, spaces), "spawn": spawn, "spec_spawn": spec_spawn,
                 "check": check, "interrupt": interrupt, "reflection": refl,
                 "lanes": [{k: s.get(k) for k in ("lane_id", "project", "actual")} for s in lanes]}
         led.run({"phase": "plan", **({"slot_record": note} if note else {}),
@@ -386,17 +410,35 @@ def backlog(cfg: dict, *args: str) -> tuple[int, str]:
     return r.returncode, (r.stdout + r.stderr).strip()
 
 
-def vault_status(vault: str, key: str) -> str | None:
-    """The item's status in the vault now (its file carries its id), or None when it is not found."""
+def vault_item(vault: str, key: str) -> dict | None:
+    """The item's front matter in the vault now (its file carries its id), or None when it is not found."""
     for tier in ("raw", "wiki", "output"):
         for path in glob.glob(os.path.join(glob.escape(vault), "*", tier, glob.escape(key) + ".md")):
-            return str(readyset.front_matter(path).get("status") or "") or None
+            return readyset.front_matter(path)
     return None
 
 
+def vault_status(vault: str, key: str) -> str | None:
+    """The item's status in the vault now, or None when it is not found."""
+    return str((vault_item(vault, key) or {}).get("status") or "") or None
+
+
 def vault_commit(cfg: dict, message: str) -> str:
+    """Commit and push what the pipeline wrote in the vault, under the vault write lock.
+
+    The lock is the one every writer in the vault shares (`metaos_pipeline/vaultlock.py`), taken for
+    this fetch-commit-push only, never around the backlog tool that wrote the files (it takes the
+    lock itself). When it stays held the commit waits for the next record phase, and says so."""
     if not cfg.get("vault_autocommit"):
         return "autocommit off"
+    try:
+        with vaultlock.vault_lock(cfg["vault"], "pipeline vault_commit", timeout=float(cfg.get("vault_lock_seconds", 60))):
+            return _vault_commit_locked(cfg, message)
+    except vaultlock.Held as exc:
+        return f"not committed: {exc}"
+
+
+def _vault_commit_locked(cfg: dict, message: str) -> str:
     v = cfg["vault"]
     def g(*a: str) -> subprocess.CompletedProcess:
         return subprocess.run(["git", "-C", v, *a], capture_output=True, text=True, timeout=180)
@@ -506,9 +548,11 @@ def record_pass(cfg: dict, led: Ledger, res: dict, now: float | None = None) -> 
                 elif pr:
                     outcome = "in_review"
                     rc, msg = backlog(cfg, "transition", run["item"], "IN REVIEW")
-                    led.event("transition", item=run["item"], to="IN REVIEW", rc=rc, msg=msg[-200:])
+                    pr_url = pr.get("url") if isinstance(pr, dict) else pr
+                    led.event("transition", item=run["item"], to="IN REVIEW", rc=rc, msg=msg[-200:], pr=pr_url)
                     if rc == 0:
-                        transitions.append(f"{run['item']} → IN REVIEW (PR {pr.get('url', pr)})")
+                        transitions.append(f"{run['item']} → IN REVIEW (PR {pr_url})")
+                        review.register(state, run["item"], pr, run.get("repo") or slot["project"], now)
                 elif c.get("branch_pushed"):
                     outcome = "ended_no_pr"
                 else:
@@ -529,6 +573,12 @@ def record_pass(cfg: dict, led: Ledger, res: dict, now: float | None = None) -> 
             if slot:
                 led.event("lane_interrupted", lane_id=lid, run_id=slot["run"]["run_id"])
                 end(slot, "interrupted")
+        # ---- the auto-merge tier over the PRs in review (off unless swarm.automerge_classes names a class)
+        transitions += review.automerge(
+            state, (cfg.get("_swarm") or {}).get("automerge_classes", []),
+            vault_status=lambda k: vault_status(cfg["vault"], k),
+            item_labels=lambda k: list((vault_item(cfg["vault"], k) or {}).get("labels") or []),
+            transition=lambda k, s: backlog(cfg, "transition", k, s), emit=led.event)
         slots.check_invariant(lanes, index)
         spent = float(state.get("spent_finished", 0.0)) + sum(cost(l) for l in slots.run_rows(lanes))
         state.update({"last_tick_ts": now, "spent": spent})
@@ -593,7 +643,20 @@ def cmd_report(cfg: dict, led: Ledger, out_path: str | None) -> int:
         for k in last.get("orphans") or []:
             L.append(f"- {k}: orphan, IN PROGRESS with no lane holding it (for the watchdog)")
         L.append("")
-    L += ["## For the human round", ""]
+    waiting = review.queue(cfg["vault"], list(cfg.get("spaces") or {}), time.time())
+    L += ["## Review queue (oldest first)", ""]
+    if waiting:
+        L += ["| item | space | days in review | since | title |", "|---|---|---|---|---|"]
+        L += [f"| {w.id} | {w.space} | {w.days} | {time.strftime('%Y-%m-%d', time.gmtime(w.since))} ({w.source}) | {w.title} |"
+              for w in waiting]
+    else:
+        L.append("_Nothing in review._")
+    weeks = review.weekly_q(led.events())
+    if weeks:
+        L += ["", "Auto-merged share `q` of the pipeline's PRs, by the week they entered review:", "",
+              "| week | PRs | auto-merged | q |", "|---|---|---|---|"]
+        L += [f"| {w} | {n} | {a} | {q:.2f} |" for w, n, a, q in weeks]
+    L += ["", "## For the human round", ""]
     seen = set()
     for rr in refl:
         for e in rr.get("escalations") or []:
@@ -638,6 +701,43 @@ def cmd_control(cfg: dict, led: Ledger, a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_start(led: Ledger, a: argparse.Namespace) -> int:
+    """`start`: the pre-flight, the launch command, then the four proofs (`metaos_pipeline/start.py`); 0 only when started."""
+    import preflight  # beside this file: the permission pre-flight
+    launch = a.launch[1:] if a.launch[:1] == ["--"] else a.launch
+    if not launch:
+        raise SystemExit("tick start: no launch command after --")
+
+    def pre() -> tuple[int, str]:
+        argv = ["--dir", a.dir, "--commands", a.commands]
+        for flag, value in (("--permission-mode", a.permission_mode), ("--user-settings", a.user_settings)):
+            if value:
+                argv += [flag, value]
+        buf = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                rc = preflight.main(argv)
+        except SystemExit as exc:  # the pre-flight's own argument parser: a refusal, with its message
+            rc = exc.code if isinstance(exc.code, int) and exc.code else 2
+            if not isinstance(exc.code, int):
+                buf.write(f"preflight: {exc.code}\n")
+        return rc, buf.getvalue()
+
+    def go():
+        """Started and not waited for: a launch that stays in the foreground must not hold the verdict back."""
+        try:
+            return subprocess.Popen(launch, stdin=subprocess.DEVNULL, start_new_session=True)
+        except OSError as exc:
+            print(f"tick start: cannot run the launch command: {exc}", file=sys.stderr)
+            return 127
+
+    engine, host = runner.OsEngine(), socket.gethostname()
+    probe = start.service_job(a.sentinel_job, inbox=a.inbox)
+    rep = start.start(led, preflight=pre, launch=go, wait=time.sleep, deadline=a.deadline, every=a.every, say=print,
+                      look=lambda since: start.observe(led, since=since, engine=engine, sentinel=probe, host=host))
+    return 0 if rep["started"] else 1
+
+
 def lease_holder(led: Ledger) -> dict | None:
     loop = led.state().get("loop") or {}
     return loop if loop.get("holder") else None
@@ -653,14 +753,27 @@ def main(argv: list[str] | None = None) -> int:
     r = sub.add_parser("record"); r.add_argument("--results", required=True)
     q = sub.add_parser("report"); q.add_argument("--out")
     u = sub.add_parser("run"); u.add_argument("--inbox", required=True); u.add_argument("--work")
+    st = sub.add_parser("start")
+    st.add_argument("--dir", required=True, help="the directory the unattended session starts in (pre-flight)")
+    st.add_argument("--commands", required=True, help="file of step command templates (pre-flight)")
+    st.add_argument("--permission-mode")
+    st.add_argument("--user-settings", help="the user's settings file (pre-flight; its default applies when unset)")
+    st.add_argument("--sentinel-job", required=True, help="the sentinel's job label in the service manager")
+    st.add_argument("--inbox", help="the runner's inbox: the sentinel's job must watch it when the manager shows its paths")
+    st.add_argument("--deadline", type=float, default=120.0, help="seconds to look for the four proofs after the launch")
+    st.add_argument("--every", type=float, default=5.0, help="seconds between looks, inside the deadline")
+    st.add_argument("launch", nargs=argparse.REMAINDER, help="-- the command that starts the run")
     c = sub.add_parser("control"); c.add_argument("target", choices=["lease"]); c.add_argument("action", choices=["take"])
     c.add_argument("--reason", required=True)
     a = ap.parse_args(argv)
+    if a.cmd == "start" and (a.every <= 0 or a.deadline < 0):
+        ap.error("start: --every must be positive and --deadline not negative")
     cfg = load_config(a.config)
     cfg["_config_path"] = os.path.abspath(a.config)
     estate = load_estate(cfg, a.metaos_config)[1]
     cfg["_swarm_lanes"] = swarm_lanes(estate)
     cfg["_swarm"] = estate.get("swarm") or {}
+    cfg["_review_sla_days"] = review_sla_days(estate)
     try:
         led = open_ledger(cfg, a.state, a.metaos_config)
         print(f"tick {a.cmd}: record in {led.describe()}", file=sys.stderr)
@@ -672,6 +785,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_run(cfg, led, a.inbox, a.work)
         if a.cmd == "control":
             return cmd_control(cfg, led, a)
+        if a.cmd == "start":
+            return cmd_start(led, a)
         if a.cmd == "plan":
             return led.replay(lambda: cmd_plan(cfg, led, a.out))
         if a.cmd == "record":

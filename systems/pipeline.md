@@ -101,7 +101,8 @@ reaches `DONE` or `NO GO`. Everything else follows from that rule.
   **oldest first** (serving the freshest items first grows a tail nobody ever reaches); an
   **auto-merge tier** (classes of change that pass every automated gate and carry no
   human-judgement flag merge without the PO; the fraction `q` that qualifies is the cheapest
-  lever on throughput); and a **review-age limit** (when the oldest waiting item crosses it,
+  lever on throughput; `pipeline/metaos_pipeline/review.py`, classes in `swarm.automerge_classes`,
+  empty by default); and a **review-age limit** (when the oldest waiting item crosses it,
   the space takes no new work, §5.1 rule 7: starving the input is the only way to stop a queue
   growing at a station that cannot be sped up).
 - **Close.** A merge triggers the automatic transition to `DONE` in every repository a lane can

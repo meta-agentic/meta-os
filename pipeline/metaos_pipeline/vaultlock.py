@@ -64,7 +64,14 @@ def vault_lock(vault: str | os.PathLike, who: str, timeout: float = 30.0):
         finally:
             _held[path] -= 1
         return
-    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    # Owner only: the file holds a pid and a command line, and nothing but this user needs to lock it.
+    # The mode is given at creation (the umask only ever removes bits) and set again for a file an
+    # older version created world-readable.
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+    except OSError:
+        pass
     deadline = time.monotonic() + timeout
     while True:
         try:

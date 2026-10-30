@@ -65,6 +65,17 @@ class VaultLockTest(unittest.TestCase):
         self.assertEqual(vaultlock.lock_path(wt), vaultlock.lock_path(self.vault))
         self.assertTrue(vaultlock.lock_path(self.vault).endswith(os.path.join(".git", "vault-write.lock")))
 
+    def test_the_lock_file_is_owner_only_whatever_the_umask_and_whatever_made_it_before(self):
+        import stat
+        old = os.umask(0)                      # the most permissive umask: the mode must not depend on it
+        self.addCleanup(os.umask, old)
+        path = vaultlock.lock_path(self.vault)
+        with vaultlock.vault_lock(self.vault, "first"):
+            self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
+        os.chmod(path, 0o644)                  # a lock file an earlier version left world-readable
+        with vaultlock.vault_lock(self.vault, "second"):
+            self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
+
 
 if __name__ == "__main__":
     unittest.main()

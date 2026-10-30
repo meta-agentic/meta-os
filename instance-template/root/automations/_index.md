@@ -13,7 +13,7 @@ hook, session start, file change).
 | Framework upgrade check | schedule (weekly) | @weekly | `scripts/upgrade.sh --check` — reports how far behind the framework's `main` this instance is, changes nothing | candidate |
 | Pre-commit fetch | event (before any commit) | — | [[hooks/_index\|hooks/]] `pre-commit-fetch.sh` — names the checkouts that are behind before a figure is derived from them; enable per the hooks index, never auto-wired | candidate |
 | Graph refresh | file change / pre-sprint | — | [[skills/graphify/SKILL\|graphify]] `--update` / `--watch` | candidate |
-| Daily standup / retro | schedule (daily) | @daily | the agile pack's `agile-process` cadence — mount it first (`scripts/packs.sh add agile`) | candidate |
+| Daily standup / retro | schedule (daily) | @daily | the agile pack's `agile-process` cadence — mount it first (`scripts/packs.sh add meta-discipline-agile`) | candidate |
 | OS heartbeat | schedule (daily) | @daily | [meta-os-dashboard](https://github.com/meta-agentic/meta-os-dashboard) `scripts/heartbeat.mjs` — lint + stale-raw + never-run checks → files a [[templates/heartbeat\|heartbeat]] note to `memory/raw/` | candidate |
 
 Executions append one JSON line to `automations/runs.jsonl`

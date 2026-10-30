@@ -14,7 +14,7 @@
     "name": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9-]*$",
-      "description": "Pack name — the key used in the registry, in .packs.yaml, and by packs.sh. Names the DISCIPLINE, not a tool."
+      "description": "Pack name — the one name a pack has: the registry key, the .packs.yaml key, the .packs/<name> mount, the name packs.sh takes and the Claude plugin name. For a first-party discipline it is meta-discipline-<x>, the name of its directory in the disciplines monorepo."
     },
     "description": {
       "type": "string",

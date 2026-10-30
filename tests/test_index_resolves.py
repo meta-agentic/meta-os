@@ -123,6 +123,47 @@ class IndexResolvesTest(unittest.TestCase):
         self.assertEqual(phantoms, set())
         self.assertEqual(provided, {}, "a linked skill resolves on disk, not from the registry")
 
+    def monorepo(self, mount: str = "mono-a") -> None:
+        """A registry pack that lives in plugins/mono-a of a repository that also holds plugins/mono-b."""
+        self.registry.write_text(REGISTRY + "  mono-a:\n    renamed-from: [old-a]\n    repo: https://example.invalid/mono\n"
+                                 "    path: plugins/mono-a\n    provides: [omega]\n    status: available\n")
+        base = self.tmp / ".packs" / mount
+        for pack, skill in (("mono-a", "omega"), ("mono-b", "zeta")):
+            (base / "plugins" / pack / "skills" / skill).mkdir(parents=True)
+            (base / "plugins" / pack / "skills" / skill / "SKILL.md").write_text(f"---\nname: {skill}\n---\n")
+        (base / ".git").write_text("gitdir: elsewhere\n")
+
+    def test_a_pack_in_a_monorepo_answers_for_its_own_directory_only(self):
+        self.monorepo()
+        self.catalog("core-skill", "omega", "zeta")
+        phantoms, provided = self.phantoms()
+        self.assertEqual(phantoms, {"zeta"}, "a sibling pack's skill is not what this mount ships")
+        self.assertNotIn("omega", provided, "omega resolves from the mount's own tree")
+
+    def test_a_mount_still_under_a_renamed_key_is_read_from_the_same_directory(self):
+        self.monorepo(mount="old-a")
+        self.catalog("core-skill", "omega", "zeta")
+        phantoms, _ = self.phantoms()
+        self.assertEqual(phantoms, {"zeta"})
+
+    def test_the_manifest_path_wins_a_bad_path_is_a_problem_and_another_source_is_the_whole_pack(self):
+        from pack_registry import registry_paths   # imported late, as the gate does
+        self.monorepo()
+        manifest = self.tmp / ".packs.yaml"
+        manifest.write_text("packs:\n  mono-a:\n    path: plugins/mono-b\n  old-a:\n    path: ../x\n")
+        paths, problems = registry_paths(self.registry, manifest)
+        self.assertEqual(paths["mono-a"], "plugins/mono-b", "the manifest's path wins over the registry's")
+        self.assertEqual(len(problems), 1)
+        self.assertIn("'old-a'", problems[0])
+        self.assertNotIn("old-a", paths)
+        gm = self.tmp / ".gitmodules"
+        gm.write_text('[submodule ".packs/mono-a"]\n\tpath = .packs/mono-a\n\turl = https://example.invalid/the-old-repo\n')
+        manifest.write_text("packs:\n")
+        self.assertNotIn("mono-a", registry_paths(self.registry, manifest, gm)[0],
+                         "a mount from another repository is the whole pack")
+        gm.write_text('[submodule ".packs/mono-a"]\n\tpath = .packs/mono-a\n\turl = https://example.invalid/mono.git\n')
+        self.assertEqual(registry_paths(self.registry, manifest, gm)[0]["mono-a"], "plugins/mono-a")
+
     def test_an_uninitialised_submodule_is_not_a_mount(self):
         # what a CI checkout without `submodules:` holds: an empty .packs/<pack>/, no links
         (self.tmp / ".packs" / "agile").mkdir(parents=True)

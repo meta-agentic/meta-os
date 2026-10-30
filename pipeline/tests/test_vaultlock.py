@@ -72,7 +72,7 @@ class VaultLockTest(unittest.TestCase):
         path = vaultlock.lock_path(self.vault)
         with vaultlock.vault_lock(self.vault, "first"):
             self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
-        os.chmod(path, 0o644)                  # a lock file an earlier version left world-readable
+        os.chmod(path, 0o700)                  # a lock file left with another mode (an earlier version made it 0644)
         with vaultlock.vault_lock(self.vault, "second"):
             self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
 

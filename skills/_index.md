@@ -18,7 +18,7 @@ whole library — never create a second real copy; discovery is via symlinks.
 | [[skills/infoviz/SKILL\|infoviz]] | Interface | Choose the visual *form* for data before drawing it — encoding, complex-data method, trust gate |
 | [[skills/skill-builder/SKILL\|skill-builder]] | Meta | Author one skill: the trigger contract, progressive disclosure, and the registration a skill is not finished without |
 | [[skills/pack-builder/SKILL\|pack-builder]] | Meta | Author a new pack: apply the is-it-a-pack test, structure (pack.yaml/profiles), parameterise, provenance/registry, verify by mounting — see [[systems/pack-strategy]] |
-| [[skills/bootstrap-instance/SKILL\|bootstrap-instance]] | Meta | One-time onboarding for a fresh instance repo: backlog/tracking model, first project, GitHub integration |
+| [[skills/bootstrap-instance/SKILL\|bootstrap-instance]] | Meta | One-time onboarding for a fresh instance repo: backlog, memory layout, first project, GitHub integration |
 | `hooks-automation` | Automation | **→ removed, third-party.** It documented claude-flow's own hook CLI; install that upstream (`npx @claude-flow/cli@latest init`) if you want it. The framework's hook *policy* — staged per pack, never auto-wired — is in [[systems/packs]] |
 | `swarm-orchestration` | Orchestration | **→ removed, third-party.** Coordination inside a session belongs to the host engine ([[systems/engine]]); the OS's own parallel model is [[systems/swarm-harness]], driven by the [agile pack](https://github.com/meta-agentic/meta-disciplines/tree/main/plugins/meta-discipline-agile)'s `agile-swarm` |
 | [[skills/multi-engine/SKILL\|multi-engine]] | Meta | Cross-provider headless fan-out via meta-cli (`claude`/`gemini`/`grok`/…); collect → `memory/raw/` — see [[systems/engine]] |

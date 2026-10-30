@@ -1,14 +1,16 @@
 ---
 name: "Bootstrap Instance"
-description: "Interactive first-run setup for a fresh meta-os instance (a clone of the framework repository): run scripts/bootstrap.sh if it has not been run, then decide the backlog/tracking model, choose packs, register the first project (and optionally its GitHub repo), and fill in the instance contract .claude/CLAUDE.md. Use once, right after cloning — not a standing operating skill."
+description: "Interactive first-run setup for a fresh meta-os instance (a clone of the framework repository): run scripts/bootstrap.sh if it has not been run, then decide the backlog, the memory layout and the first project, choose packs (and optionally its GitHub repo), and fill in the instance contract .claude/CLAUDE.md. Use once, right after cloning — not a standing operating skill."
 ---
 
 # Bootstrap Instance
 
 A fresh instance — a clone of the framework repository, bootstrapped or not yet — is
-structurally correct but has **zero decisions made**: no backlog model chosen, no first
+structurally correct but has **zero decisions made**: no backlog declared, no first
 project, no instance facts filled in. This skill runs that onboarding conversation once,
 so the estate starts from a real decision instead of an empty placeholder.
+Every decision has a non-interactive path in the script (`--backlog`, `--memory-layout`,
+`--project`, `--packs`): the script is the one place that writes them.
 
 Run this **once per new instance**, right after the repo is cloned and opened. It is
 not a standing operating skill — [[skills/agile-process/SKILL|agile-process]],
@@ -35,25 +37,28 @@ contract, instantiated from `instance-template/root/` by `scripts/bootstrap.sh`,
 
 Don't proceed until the instance files exist — every later step writes into them.
 
-## Step 1 — Backlog & tracking model
+## Step 1 — Backlog
 
-Ask the user (present as distinct options, not a leading question):
+Ask where the backlog lives (present as distinct options, not a leading question):
 
-1. **No tracker yet** — work stays skill-driven; add a tracker later. Nothing to
-   configure now.
-2. **Local JSON backlog** — a self-contained `backlog.json` (stories/sprints/epics,
-   no external tracker) lives in the instance or a project repo. Lightweight, git-diffable,
-   no external account needed.
-3. **Jira-integrated** — an external Jira project is the source of truth, mirrored into
-   a `backlog.json` via [[skills/agile-process/SKILL|agile-process]]'s `sync.py`. Heavier:
-   needs a Jira project key and (per that skill's convention) a private repo to hold the
-   mirror.
+1. **None yet** — work stays skill-driven; add a backlog later.
+2. **A per-item backlog** — one markdown file per work item, filed by lifecycle tier,
+   kept in a directory of its own (typically a separate vault repository, which brings
+   its own CLI and gate). Ask for a **space key** (the backlog's short name) and the
+   **directory**.
 
-Record the choice in the instance contract `.claude/CLAUDE.md`, "Instance facts" section:
+An external tracker is not part of this decision. Whether one exists, and whether it is
+read-only or the tracker of record, is the agile pack's `tracker` setting (Step 1b); the
+estate config only records where the backlog is.
 
-- **(1)** — leave the authority-order line out entirely.
-- **(2)** — `**Backlog:** local JSON — see \`<path-to-backlog.json>\`. No external tracker.`
-- **(3)** — `**Authority order (process/backlog):** Jira (project <KEY>) → \`<mirror-repo>/backlog.json\` → agile-process → framework invariants.` and confirm a mirror repo exists (offer to `gh repo create <owner>/<mirror-repo> --private` if not — **ask before creating**).
+Record the choice by running the script, which writes `backlogs[]` in
+`meta-os.config.json` ([[systems/config]]) and is idempotent:
+
+- **(1)** — `scripts/bootstrap.sh --yes --backlog none`
+- **(2)** — `scripts/bootstrap.sh --yes --backlog <space>=<directory>` (repeat the flag
+  for more spaces; `${var}` in the directory expands against `vars`)
+
+A conflicting value already in the file is reported and left alone; change it by hand.
 
 ## Step 1b — Skill packs
 
@@ -69,27 +74,35 @@ curated registry.
 
 **Configure a mounted pack.** A pack that ships a `pack.yaml` is parameterised — write
 its `config:` block under `packs.<name>` in `.packs.yaml` from the choices already made,
-then confirm with `scripts/packs.sh config <name>`. For the **agile** pack, map the
-Step 1 backlog model straight to its config: Jira-integrated → `profile: scrum, tracker:
-jira` (+ `space`, `mirror-repo`); local JSON → `profile: scrum, tracker: local`; no
-tracker → `profile: kanban, tracker: none`. Suggest the agile pack whenever the user
-chose any tracked model in Step 1.
+then confirm with `scripts/packs.sh config <name>`. For the **agile** pack, take `space` from
+the Step 1 space key and ask which `tracker` applies (`jira | local | none`, as the pack
+documents it): an external tracker, a backlog with none, or no backlog (`profile: kanban,
+tracker: none`). Suggest the agile pack whenever the user chose a backlog in Step 1.
 
-## Step 2 — First project
+## Step 2 — Memory layout and first project
 
-Ask for the first project to register: **name**, **local path**, and whether the repo
-**already exists** or needs creating.
+**Memory layout.** Ask which topology the instance wants ([[systems/memory-layer]],
+"Choosing a layout"): `default` (the instance's own `memory/{raw,wiki,output}` plus
+`vaults/*`, no config block), or one canon root with layout `flat`, `tier/project` or
+`project/tier`. Record it with `scripts/bootstrap.sh --yes --memory-layout <layout>`.
+More roots and federated mounts are estate knowledge you add to `meta-os.config.json` by
+hand.
+
+**First project.** Ask for the first project to register: **name**, **local path**, and
+whether the repo **already exists** or needs creating.
 
 - If it exists: read its stack from what's actually there (package.json, pom.xml,
   Cargo.toml, etc.) — don't guess.
 - If it doesn't exist yet: offer to `git init` it at the given path (or `gh repo create`
   — see Step 3). **Ask before running either.**
 
-Then scaffold the node:
+Then scaffold the node with `scripts/bootstrap.sh --yes --project <name>`: it writes
+`projects/<name>.md` from [[templates/project|templates/project.md]] and adds the row to
+[[projects/_index|projects/_index.md]]. Re-running reports it as already configured.
+Then fill the node's `path`, `stack`, `tags` and one-line purpose, and the row's purpose
+and stack cells, from what you read.
 
-1. Copy [[templates/project|templates/project.md]] to `projects/<name>.md`.
-2. Fill `name`, `path`, `stack`, `tags`; write the one-line purpose.
-3. Add a row to [[projects/_index|projects/_index.md]]'s table.
+The three flags combine in one call, and `--dry-run` shows what would be written.
 
 ## Step 3 — GitHub integration for the project
 

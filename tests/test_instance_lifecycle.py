@@ -234,6 +234,104 @@ class LifecycleTest(unittest.TestCase):
         self.assertEqual(git(inst, "status", "--porcelain"), "")
         self.assertIn("origin", git(inst, "remote"))
 
+    # --- estate decisions: --backlog, --memory-layout, --project -------------------------
+
+    def bootstrap_raw(self, inst: Path, *extra: str, check=True):
+        return run(["scripts/bootstrap.sh", "--yes", "--name", inst.name,
+                    "--upstream", str(self.upstream), *extra], inst, check=check)
+
+    def config(self, inst: Path) -> dict:
+        import json
+        return json.loads((inst / "meta-os.config.json").read_text())
+
+    def test_the_estate_decision_flags_write_config_and_the_project_node(self):
+        inst = self.clone_instance()
+        out = self.bootstrap(inst, "--backlog", "abc=${estate}/vault/abc",
+                             "--memory-layout", "project/tier", "--project", "alpha")
+        cfg = self.config(inst)
+        self.assertEqual(cfg["backlogs"], [{"space": "abc", "path": "${estate}/vault/abc"}])
+        self.assertEqual(cfg["memory"]["roots"],
+                         [{"label": "instance", "path": "${instance}/memory", "layout": "project/tier"}])
+        self.assertEqual(cfg["vars"]["instance"], str(inst))
+        node = (inst / "projects" / "alpha.md").read_text()
+        self.assertIn("name: alpha", node)
+        self.assertIn("# alpha", node)
+        self.assertNotIn("{{", node)
+        index = (inst / "projects" / "_index.md").read_text()
+        self.assertIn("[[projects/alpha\\|alpha]]", index)
+        self.assertNotIn("_(none yet)_", index)
+        self.assertIn("Estate decisions", out)
+        try:
+            import jsonschema
+        except ModuleNotFoundError:
+            return
+        import json
+        schema = json.loads((inst / "systems" / "meta-os.config.schema.json").read_text())
+        jsonschema.Draft7Validator(schema).validate(cfg)
+
+    def test_the_estate_decision_flags_are_idempotent(self):
+        inst = self.clone_instance()
+        flags = ("--backlog", "abc=/b", "--memory-layout", "flat", "--project", "alpha")
+        self.bootstrap(inst, "--commit", *flags)
+        before = git(inst, "rev-parse", "HEAD")
+        out = self.bootstrap(inst, *flags)
+        self.assertIn("backlog: already configured", out)
+        self.assertIn("memory layout: already configured", out)
+        self.assertIn("project: projects/alpha.md already configured", out)
+        self.assertEqual(git(inst, "status", "--porcelain"), "")
+        self.assertEqual(before, git(inst, "rev-parse", "HEAD"))
+        self.bootstrap(inst, "--project", "beta")
+        rows = [l for l in (inst / "projects" / "_index.md").read_text().splitlines()
+                if l.startswith("| alpha") or l.startswith("| beta")]
+        self.assertEqual(len(rows), 2)
+
+    def test_the_estate_decision_values_none_and_default(self):
+        inst = self.clone_instance()
+        self.bootstrap(inst, "--backlog", "none", "--memory-layout", "default")
+        cfg = self.config(inst)
+        self.assertEqual(cfg["backlogs"], [])
+        self.assertNotIn("memory", cfg)
+        out = self.bootstrap(inst, "--backlog", "none", "--memory-layout", "default")
+        self.assertIn("backlog: already configured", out)
+        self.assertIn("memory layout: already configured", out)
+
+    def test_the_estate_decision_flags_dry_run_writes_nothing(self):
+        inst = self.clone_instance()
+        out = self.bootstrap(inst, "--dry-run", "--backlog", "abc=/b",
+                             "--memory-layout", "flat", "--project", "alpha")
+        self.assertIn("would write projects/alpha.md", out)
+        self.assertEqual(git(inst, "status", "--porcelain"), "")
+        self.bootstrap(inst)
+        before = (inst / "meta-os.config.json").read_text()
+        out = self.bootstrap(inst, "--dry-run", "--backlog", "abc=/b",
+                             "--memory-layout", "flat", "--project", "alpha")
+        self.assertIn("would set", out)
+        self.assertIn("would write projects/alpha.md", out)
+        self.assertEqual(before, (inst / "meta-os.config.json").read_text())
+        self.assertFalse((inst / "projects" / "alpha.md").exists())
+
+    def test_a_bad_estate_decision_value_fails_with_an_actionable_message(self):
+        inst = self.clone_instance()
+        for flags, hint in (
+            (("--memory-layout", "tree"), "use one of: default, flat, tier/project, project/tier"),
+            (("--backlog", "jira"), "use 'none' or SPACE=PATH"),
+            (("--backlog", "none", "--backlog", "a=/p"), "cannot be combined"),
+            (("--project", "bad name"), "use letters, digits"),
+        ):
+            r = self.bootstrap_raw(inst, *flags, check=False)
+            self.assertNotEqual(r.returncode, 0, flags)
+            self.assertIn(hint, r.stderr)
+        self.assertFalse((inst / ".claude" / "CLAUDE.md").exists(), "a bad value must stop before any write")
+
+    def test_a_conflicting_backlog_is_refused_and_leaves_the_config_alone(self):
+        inst = self.clone_instance()
+        self.bootstrap(inst, "--backlog", "abc=/b")
+        before = (inst / "meta-os.config.json").read_text()
+        r = self.bootstrap_raw(inst, "--backlog", "abc=/other", check=False)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("edit it by hand", r.stderr)
+        self.assertEqual(before, (inst / "meta-os.config.json").read_text())
+
     def test_developer_mode_keeps_the_instance_files_out_of_git(self):
         inst = self.clone_instance("dev")
         out = self.bootstrap(inst, "--local")

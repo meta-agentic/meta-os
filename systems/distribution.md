@@ -111,6 +111,8 @@ The merge touches framework paths only (rule 1). After it, `scripts/packs.sh syn
 rebuilds the links so a skill the framework added is discoverable at once, and the
 framework's own gate runs scoped to the framework's paths.
 
+**A notice at session start.** `hooks/framework-status.sh` (`hooks/_index.md`) is a check-only `SessionStart` hook the template wires in `.claude/settings.json`: it prints one line when the framework is behind, the repository predates this layout, framework paths were edited, or the template changed, and names the command; it merges and fetches nothing. An instance that predates the hook wires it once by hand.
+
 **The template is reported, not re-applied.** An instance's `_index.md`, `projects/`,
 `automations/` are its own from the moment they were instantiated; a later change to
 `instance-template/root/` is shown as a diff since the `template` ref recorded in

@@ -15,6 +15,7 @@ become a mechanism.
 | Hook | Event | What it does |
 |------|-------|--------------|
 | `pre-commit-fetch.sh` | `PreToolUse` · `Bash` | Before any commit, fetch every tracked repo's default branch and name the checkouts that are behind. Reports; never blocks. |
+| `framework-status.sh` | `SessionStart` | One line when the framework in this instance needs attention: behind (or moved since the last fetch), the repository predates the one-repository layout, framework paths edited here, the template changed since instantiation. Check only; silent when current and when offline. Wired in `.claude/settings.json` by the instance template. |
 | `error-handler.sh` | *(called by hooks)* | Observability sink — counters, gauges and an event log. Not a hook itself; hooks invoke it. |
 
 ## Staged, never auto-wired
@@ -64,6 +65,23 @@ Hook arrays **merge** across settings sources — adding this does not displace 
 already configured elsewhere. Open `/hooks` once afterwards, or restart, so the settings
 watcher picks the file up.
 
+## Framework status — `framework-status.sh`
+
+A `SessionStart` hook that tells the operator, in one line, when the framework in this instance needs attention, and does nothing else: **it informs and never acts**. Nobody who cloned meta-os before the one-repository layout learns of it on a `git pull` (git never runs repository code on a pull), and `scripts/adopt.py` helps only someone who knows it exists. An unattended upgrade would merge code mid-session, change skills an open session is using, bypass review and execute whatever `upstream` holds, so the hook only names the command.
+
+It prints one JSON line (`systemMessage` for the operator, the same text as `additionalContext` for the session) when one of these holds, and nothing otherwise:
+
+| Finding | Names |
+|---|---|
+| the framework is N commits behind (as of the last fetch) | `scripts/upgrade.sh --check` |
+| the framework moved since the last fetch | `scripts/upgrade.sh --check` |
+| the repository predates the one-repository layout | `git fetch upstream && git show upstream/main:scripts/upgrade.sh \| bash -s -- --adopt --dry-run` |
+| framework paths edited in this instance | `scripts/upgrade.sh --check` |
+| `instance-template/` changed since instantiation, unless acknowledged | `scripts/upgrade.sh --check` |
+
+It writes one small stamp under the git directory (`meta-os-status`) and nothing else: no fetch (a fetch moves refs), no `git status` (it refreshes the index). The remote is asked once a day with a bounded `git ls-remote`, and a failed or slow attempt is stamped as well, so a machine without a network pays the bound once a day and is otherwise silent and fast. It always exits 0, so it never blocks a session. `METAOS_STATUS_OFF=1` disables it; `METAOS_STATUS_TTL`, `METAOS_STATUS_TIMEOUT`, `METAOS_FRAMEWORK_REMOTE` and `METAOS_FRAMEWORK_BRANCH` tune it.
+
+An instance bootstrapped from the template has it wired in `.claude/settings.json` (`instance-template/root/.claude/settings.json`). An instance that predates the hook, and one in the older sibling layout, wires it once by hand: add a `SessionStart` entry to its `.claude/settings.json` running `bash "$CLAUDE_PROJECT_DIR/hooks/framework-status.sh"` (the path of the script wherever the framework's `hooks/` is mounted). Hooks are executable code, so that is a decision, not something the framework does for you.
 ---
 
 ## `pre-commit-fetch.sh`

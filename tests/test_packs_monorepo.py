@@ -65,10 +65,20 @@ class MonorepoTest(PacksShFixture):
     def test_only_the_packs_directory_is_checked_out(self):
         if "sparse-checkout" not in subprocess.run(["git", "help", "-a"], capture_output=True, text=True).stdout:
             self.skipTest("this git has no sparse-checkout; the whole tree is checked out, which only costs space")
-        self.packs("add", "disc-a")
-        mount = self.inst / ".packs" / "disc-a" / "plugins"
-        self.assertTrue((mount / "disc-a").is_dir())
-        self.assertFalse((mount / "disc-b").exists())
+        added = self.packs("add", "disc-a")
+        root = self.inst / ".packs" / "disc-a"
+        mount = root / "plugins"
+
+        def diagnostics() -> str:
+            def sh(*a):
+                r = subprocess.run(a, cwd=root, capture_output=True, text=True)
+                return (r.stdout + r.stderr).strip()
+            return "\n".join([sh("git", "--version"), "add stderr: " + added.stderr.strip(),
+                               "sparse list: " + sh("git", "sparse-checkout", "list"),
+                               "config: " + sh("git", "config", "--show-origin", "--get-regexp", "sparse|worktree"),
+                               "tree: " + sh("ls", "-la", "plugins", "plugins/disc-b")])
+        self.assertTrue((mount / "disc-a").is_dir(), diagnostics())
+        self.assertFalse((mount / "disc-b").exists(), diagnostics())
 
     def test_a_whole_tree_checkout_still_links_only_the_pack_directory(self):
         """Without sparse-checkout (an older git, a CI checkout) the sibling's files are on disk too."""

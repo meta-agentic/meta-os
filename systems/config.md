@@ -70,7 +70,7 @@ optional; the file may be omitted entirely (defaults apply). Shape:
 | `min_lanes` | `m_min`, the fewest working lanes the regulator keeps while the pipe runs | 1 |
 | `tokens` | `N`, the CONWIP cap, set by a human from the sizing | `2 × lanes` |
 | `fairness_share` | the largest share of the tokens one space may hold | 0.5 |
-| `automerge_classes` | change classes that merge without the human station | `[]` |
+| `automerge_classes` | change classes that merge without the human station: `docs-only`, `tests-only`; any other name never matches | `[]` |
 | `review_sla_days` | a space whose oldest item in review is older takes no new work | 5 |
 | `review_queue_cap` | the most items one space may hold in review before it takes no new work | 4 |
 | `lane_budget` | a run's cap as a multiple of its expected cost | 3 |

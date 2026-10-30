@@ -49,7 +49,7 @@
         "min_lanes": {"type": "integer", "description": "m_min: the fewest working lanes the regulator keeps while the pipe runs.", "default": 1, "minimum": 1},
         "tokens": {"type": "integer", "description": "N: the CONWIP cap, items from start until DONE or NO GO. Set by a human from the sizing; default twice `lanes`.", "minimum": 1},
         "fairness_share": {"type": "number", "description": "The largest share of the tokens one space may hold.", "default": 0.5, "minimum": 0, "maximum": 1},
-        "automerge_classes": {"type": "array", "items": {"type": "string"}, "default": [], "description": "Change classes that merge without the human station."},
+        "automerge_classes": {"type": "array", "items": {"type": "string"}, "default": [], "description": "Change classes that merge without the human station: docs-only, tests-only. A name without a classifier never matches; empty turns the tier off."},
         "review_sla_days": {"type": "number", "description": "The review-age limit: a space whose oldest item in review is older takes no new work.", "default": 5, "minimum": 0},
         "review_queue_cap": {"type": "integer", "description": "The most items one space may hold in review before it takes no new work.", "default": 4, "minimum": 1},
         "lane_budget": {"type": "number", "description": "A run's cap, as a multiple of its expected cost; over it the run is interrupted and given back.", "default": 3, "minimum": 1},

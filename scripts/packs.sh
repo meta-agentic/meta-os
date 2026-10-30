@@ -459,6 +459,13 @@ unmount_half() { # <name>
   git submodule deinit -f ".packs/$1" >/dev/null 2>&1 || true
   git rm -f -q ".packs/$1" >/dev/null 2>&1 || true
   rm -rf -- "$gd" ".packs/$1"
+  # the add created .gitmodules; with no submodule left in it, take the file back out too
+  if [ -f .gitmodules ] && ! grep -q '^\[submodule ' .gitmodules; then
+    git rm -f -q --cached .gitmodules >/dev/null 2>&1 || true
+    rm -f .gitmodules
+  elif [ -f .gitmodules ]; then
+    git reset -q -- .gitmodules >/dev/null 2>&1 || true
+  fi
 }
 
 cmd_add() {

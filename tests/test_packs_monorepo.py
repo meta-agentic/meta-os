@@ -102,11 +102,24 @@ class MonorepoTest(PacksShFixture):
         self.assertIn("plugins/not-there is not in", r.stderr)
         self.assertFalse((self.inst / ".packs" / "disc-b").exists(), "the half-added mount was taken back out")
         self.assertEqual(git(self.inst, "submodule", "status").strip(), "")
+        self.assertEqual(git(self.inst, "status", "--porcelain", "--", ".gitmodules", ".packs").strip(), "",
+                         "nothing of the refused add is left staged or on disk")
         gm = self.inst / ".gitmodules"
         self.assertTrue(not gm.exists() or "disc-b" not in gm.read_text())
         self.assertFalse((self.inst / ".packs.yaml").exists() and "disc-b" in (self.inst / ".packs.yaml").read_text())
         self.registry()
         self.assertEqual(self.packs("add", "disc-b").returncode, 0, "a corrected path adds cleanly afterwards")
+
+    def test_a_refused_add_beside_an_existing_mount_leaves_that_mount_and_nothing_staged(self):
+        self.packs("add", "disc-a")
+        git(self.inst, "add", ".gitmodules", ".packs", ".packs.yaml")
+        git(self.inst, "commit", "-q", "-m", "mounted a")
+        self.registry(b_path="plugins/not-there")
+        self.assertNotEqual(self.packs("add", "disc-b", check=False).returncode, 0)
+        self.assertEqual(git(self.inst, "status", "--porcelain", "--", ".gitmodules", ".packs").strip(), "")
+        self.assertIn("disc-a", (self.inst / ".gitmodules").read_text())
+        self.assertNotIn("disc-b", (self.inst / ".gitmodules").read_text())
+        self.assertTrue((self.inst / ".packs" / "disc-a" / "plugins" / "disc-a").is_dir())
 
     def test_a_path_that_climbs_out_of_the_mount_is_refused(self):
         self.write_manifest(f"  disc-a:\n    repo: {self.mono}\n    path: ../../etc\n")

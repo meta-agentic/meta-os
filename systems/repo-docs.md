@@ -70,7 +70,7 @@ find the deep material without wading through the basics being re-explained.
 
 ## Decision records
 
-Every repo that keeps decision records names and indexes them the same way, and this section is that convention's one home: a repo's record index links here rather than restating it. What makes a record worth keeping (forces, rejected alternatives, accepted cost, reopening trigger) belongs to the [decision-records skill](https://github.com/meta-agentic/meta-discipline-swe/blob/main/skills/decision-records/SKILL.md); this section fixes only where records live, what they are called, and how they are numbered.
+Every repo that keeps decision records names and indexes them the same way, and this section is that convention's one home: a repo's record index links here rather than restating it. What makes a record worth keeping (forces, rejected alternatives, accepted cost, reopening trigger) belongs to the [decision-records skill](https://github.com/meta-agentic/meta-disciplines/blob/main/plugins/meta-discipline-swe/skills/decision-records/SKILL.md); this section fixes only where records live, what they are called, and how they are numbered.
 
 | | Rule |
 |---|---|

@@ -22,14 +22,9 @@ disciplines beyond software), see [[systems/pack-strategy]]. To *author* one, us
 
 ## Vocabulary — pack, discipline, registry name
 
-One thing, three names, deliberately: **pack** is the *mechanism* (a mountable, pinned
-repo of skills), **discipline** is what a good one *contains* (a method + a rigor
-standard + portability — [[systems/pack-strategy]]), and the **registry name** is the
-short key an instance mounts it by. First-party discipline repos are therefore named
-`meta-discipline-<name>` while the registry key names the discipline, not the repo
-(`agile` → `meta-discipline-agile`, `advanced-math` → `meta-discipline-math`); the
-authoring skeleton follows the same rule (`pack-builder/resources/discipline-pack/`).
-Where these docs say *pack*, read *a discipline packaged for mounting*.
+One thing, two names: **pack** is the *mechanism* (a mountable, pinned tree of skills) and **discipline** is what a good one *contains* (a method + a rigor standard + portability — [[systems/pack-strategy]]). A pack has **one name**, the same everywhere: the registry key, `pack.yaml` `name:`, the `.packs/<name>` mount, `packs.sh <command> <name>`, `depends:`, the key in an instance's `.packs.yaml` and, for the first-party packs, the Claude plugin name. For a first-party discipline that name is `meta-discipline-<x>`, the name of its directory in the disciplines monorepo (`meta-discipline-agile`, `meta-discipline-math`, `meta-discipline-physics`, `meta-discipline-swe`, `meta-discipline-agents`); a third-party pack keeps the key it is registered under. The authoring skeleton follows the same rule (`pack-builder/resources/discipline-pack/`). Where these docs say *pack*, read *a discipline packaged for mounting*.
+
+**Renamed keys (deprecation, one minor version).** The first-party packs were keyed by a short discipline name before this rule (`agile`, `advanced-math`, `physics`, `software-engineering`, `agents`, `visualization`). Each registry entry keeps its old key in `renamed-from:`, so an instance still keyed by one keeps working: `check`, `apply` and `config` read the entry it has and warn once per old key (`deprecated pack key: 'agile' is now 'meta-discipline-agile'`), and `config` accepts either spelling. `scripts/packs.sh migrate` converts the instance: the manifest entry (config block and all) moves to the new key and a mounted submodule is moved to `.packs/<new>` (`git mv`), then `sync` relinks. It refuses an instance that holds both keys of one pack rather than merge them. The second `check` is clean and silent. The `renamed-from:` rows are removed after the next minor version.
 
 ## What a discipline adds to a skill
 
@@ -70,6 +65,7 @@ as-is.
 
 - A mounted pack lives at `.packs/<name>/` — a **pinned git submodule**, dot-folder so
   Obsidian doesn't index it directly; the pack is reached through its links.
+- **A pack inside a monorepo.** A first-party pack is a directory of the disciplines monorepo, not a repository of its own. Its registry entry (or its manifest entry, which wins) carries `path: plugins/<name>`, and `repo:` names the monorepo. `packs.sh add` mounts the repository at `.packs/<name>` as a **sparse submodule** (git's cone mode, down to `path:`; a git without sparse-checkout gets the whole tree, which only costs space) and reads the pack from `.packs/<name>/<path>`: its `pack.yaml`, its skills, its `agents/` and `hooks/`, and `config`. A sibling pack's skills in the same repository are never this pack's. Two packs of one monorepo are two mounts, each pinned on its own; the pin is the monorepo commit. `check` refuses a mount that does not have its `path:` (after a pin move, say), and a `path:` that climbs with `..` or has an empty segment is refused outright.
 - `skills/` is the framework's own folder, and the pack skills are **linked into it**
   beside the framework's real skill folders, as per-skill relative symlinks.
   `scripts/packs.sh sync` places them (and lists them in `.git/info/exclude`, so they
@@ -145,7 +141,7 @@ the vault, so it survives image upgrades and re-applies on every boot.
 
 ```yaml
 packs:
-  agile:
+  meta-discipline-agile:
     install: plugin                               # no submodule, no links
     plugin: meta-discipline-agile@meta-agentic    # optional — the registry's `plugin:` is the default
     config:
@@ -167,7 +163,7 @@ that packs separate three things:
 
    ```yaml
    packs:
-     agile:
+     meta-discipline-agile:
        config:
          space: acme
          tracker: jira          # jira | local | none
@@ -269,7 +265,7 @@ the depending pack's `pack.yaml` and mirrored in its registry entry (so it can b
 
 ```yaml
 depends:
-  - name: advanced-math
+  - name: meta-discipline-math
     for: [dimensional-analysis]
     reason: "units homogeneity, Buckingham π, uncertainty propagation — not duplicated here"
 ```

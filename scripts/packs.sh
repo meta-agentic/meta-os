@@ -20,6 +20,11 @@
 #     $GIT_DIR/info/exclude — the root .gitignore is the framework's, so that file is the
 #     instance's extension point for root-level rules (systems/distribution.md)
 #
+# A first-party pack lives in a subdirectory of the disciplines monorepo (`path:` in the registry
+# or the manifest): the repository is mounted at .packs/<name> as a sparse submodule and the pack
+# is read from .packs/<name>/<path>. A pack key that was renamed (`renamed-from:` in the registry)
+# still works for a minor version with a warning; `migrate` rewrites an instance to the new keys.
+#
 # This is the framework's single home of the script. Earlier it was vendored per instance
 # from the instance template, and the fixes an instance made to its copy (pin enforcement,
 # name validation, worktree-safe remove, config block parsing, dangling-mount refusal)
@@ -31,9 +36,19 @@ die() { echo "packs.sh: $*" >&2; exit 1; }
 valid_name() { [[ "$1" =~ ^[a-zA-Z0-9_-]+$ ]] || die "invalid pack name '$1' (allowed: letters, digits, _ and -)"; }
 [ -f CLAUDE.md ] && [ -d skills ] && [ -d systems ] || die "run from the repository root (the folder holding CLAUDE.md, skills/ and systems/)"
 
-registry_field() { # <pack> <field> → value from systems/packs.yaml, empty if absent
+registry_name() { # <key> → the registry key now carrying it: itself, or the entry whose renamed-from lists it
+  [ -f systems/packs.yaml ] || { echo "$1"; return; }
+  awk -v k="$1" '
+    /^  [a-zA-Z0-9_-]+:/ { cur=$1; sub(/:$/,"",cur); if (cur == k) exact=1 }
+    $1 == "renamed-from:" { l=$0; sub(/^[^:]*:/,"",l); gsub(/[][,"\047]/," ",l)
+                            n=split(l,a," "); for (i=1;i<=n;i++) if (a[i] == k) hit=cur }
+    END { print (exact || hit == "") ? k : hit }
+  ' systems/packs.yaml
+}
+registry_field() { # <pack> <field> → value from systems/packs.yaml, empty if absent (a renamed key reads its new entry)
   [ -f systems/packs.yaml ] || return 0
-  awk -v p="$1" -v f="$2:" '
+  local key; key=$(registry_name "$1")
+  awk -v p="$key" -v f="$2:" '
     $0 ~ "^  "p":$" { inpack=1; next }
     inpack && /^  [a-zA-Z0-9_-]+:/ { inpack=0 }
     inpack && $1 == f { $1=""; sub(/^ /,""); gsub(/"/,""); print; exit }
@@ -78,6 +93,16 @@ manifest_field() { # <name> <field> → that field of the pack's entry (repo, in
     inpack && /^    [a-z]/ && $1 == f { gsub(/["\047]/,"",$2); print $2; exit }   # entry level, not config:
   ' "$MANIFEST"
 }
+# Where a pack's own tree is: .packs/<name>, or .packs/<name>/<path> for a pack that lives in
+# a subdirectory of its repository (the manifest's `path:` wins over the registry's).
+pack_subpath() { # <name> → the path inside the mount, empty for a whole-repository pack
+  local sub; sub=$(manifest_field "$1" path); [ -n "$sub" ] || sub=$(registry_field "$1" path)
+  sub="${sub#/}"; sub="${sub%/}"
+  if [ -n "$sub" ]; then case "/$sub/" in */../*|*//*) die "pack '$1': path '$sub' must be a plain relative directory" ;; esac; fi
+  echo "$sub"
+}
+pack_dir() { local sub; sub=$(pack_subpath "$1"); echo ".packs/$1${sub:+/$sub}"; }
+
 # A pack installed as a Claude Code plugin (`install: plugin`): install_mode, is_plugin,
 # plugin_id, plugin_drift, plugin_pack_yaml, plugin_list, not_a_plugin.
 # shellcheck source=scripts/packs_plugin.sh
@@ -155,14 +180,41 @@ pack_yaml_field() { # <pack.yaml> <key> <default|one_of> → value from the pack
     inkey && index($0,"    " want ":")==1 { emit(substr($0,index($0,":")+1)) }
   ' "$f"
 }
+# --- renamed pack keys ----------------------------------------------------------
+# An instance still keyed by an old name (the registry's `renamed-from:`) keeps working for a
+# minor version: every command reads the entry it has, and says once that the key is deprecated.
+# `migrate` rewrites the keys. A name given on the command line may be either spelling.
+config_key() { # <name> → the key this manifest uses for the pack that <name> names
+  local want k; want=$(registry_name "$1")
+  manifest_names | grep -qx -- "$1" && { echo "$1"; return; }
+  for k in $(manifest_names); do
+    if [ "$(registry_name "$k")" = "$want" ]; then
+      echo "warn: pack '$1' is keyed '$k' in $MANIFEST — read as the same pack" >&2
+      echo "$k"; return
+    fi
+  done
+  echo "$1"
+}
+deprecated_keys() { # one line per manifest key the registry has renamed
+  local k n
+  for k in $(manifest_names); do
+    n=$(registry_name "$k")
+    [ "$n" = "$k" ] || echo "deprecated pack key: '$k' is now '$n' ($MANIFEST; run scripts/packs.sh migrate)"
+  done
+}
+check_paths() { local n; for n in $(manifest_names); do pack_subpath "$n" >/dev/null; done; }   # dies in this shell on a bad path
+warn_deprecated() { local l; deprecated_keys | while read -r l; do echo "warn: $l" >&2; done; }
+
 cmd_config() {
   local pack="${1:?usage: packs.sh config <pack> [key]}" key="${2:-}"
   valid_name "$pack"
-  local schema=".packs/$pack/pack.yaml" keys mkeys missing=""
+  pack=$(config_key "$pack")
+  local schema keys mkeys missing=""
   [[ "$(install_mode "$pack")" =~ ^(plugin|submodule)$ ]] || die "$(plugin_drift config | grep -F "for $pack:")"
   if is_plugin "$pack"; then   # never fails for want of the plugin: the instance values still print
     schema=$(plugin_pack_yaml "$pack"); [ -n "$schema" ] || missing=1
   else
+    schema="$(pack_dir "$pack")/pack.yaml"
     [ -L ".packs/$pack" ] && [ ! -e ".packs/$pack" ] \
       && die "pack '$pack' is a dangling mount (.packs/$pack -> $(readlink ".packs/$pack")) — refusing"
     [ -d ".packs/$pack" ] || die "pack '$pack' is not mounted"
@@ -205,6 +257,9 @@ dangling_packs() {
       echo "dangling mount: $p -> $(readlink "$p")"
     elif [ -d "$p" ] && [ -z "$(ls -A "$p")" ]; then
       echo "dangling mount: $p is empty (submodule not initialised? git submodule update --init $p)"
+    elif [ -d "$p" ] && manifest_names | grep -qx -- "$(basename "$p")" && ! is_plugin "$(basename "$p")" \
+         && [ ! -d "$(pack_dir "$(basename "$p")")" ]; then
+      echo "dangling mount: $p has no $(pack_subpath "$(basename "$p")") (the path the registry or $MANIFEST gives for the pack)"
     fi
   done
 }
@@ -256,7 +311,7 @@ union_plan() {
   {
     for p in .packs/*/; do
       [ -d "$p" ] && ! is_plugin "$(basename "$p")" || continue
-      pack_skill_dirs "${p%/}" | while read -r d; do printf '%s\t../%s\n' "$(basename "$d")" "$d"; done
+      pack_skill_dirs "$(pack_dir "$(basename "$p")")" | while read -r d; do printf '%s\t../%s\n' "$(basename "$d")" "$d"; done
     done
   } | awk -F'\t' -v warn="${1:-}" '
       seen[$1]++ { if (warn) printf "warn: %s -> %s is shadowed by an earlier skill — skipped\n", $1, $2 > "/dev/stderr"; next }
@@ -303,11 +358,14 @@ refuse_found() { # <findings> — print each, then refuse
 }
 refuse_dangling() { refuse_found "$("$1")"; }
 cmd_check() {
+  check_paths
+  warn_deprecated
   refuse_found "$(dangling_packs; dangling_links; manifest_drift; pin_drift; union_drift)"
   echo "check: mounts match $MANIFEST and their pins, no dangling mounts, union current"
 }
 
 cmd_sync() {
+  check_paths
   refuse_dangling dangling_packs
   [ -d skills ] && [ ! -L skills ] || die "skills/ is not a directory — this is not a meta-os checkout"
   find skills -maxdepth 1 -type l -exec rm {} +
@@ -334,7 +392,7 @@ sync_claude() {
     [ ! -L "$s" ] || die "$s is a symlink (-> $(readlink "$s")); packs.sh manages it as a directory of links — remove the link, then re-run"
   done
   mkdir -p .claude/skills .claude/agents .claude/hooks
-  local d name p pname f b
+  local d name p pname f b root
   find .claude/skills -maxdepth 1 -type l -exec rm {} +
   for d in skills/*/; do
     name=$(basename "$d")
@@ -344,24 +402,33 @@ sync_claude() {
   find .claude/hooks -maxdepth 1 -type l -exec rm {} +
   for p in .packs/*/; do
     [ -d "$p" ] && ! is_plugin "$(basename "$p")" || continue
-    pname=$(basename "$p")
-    if [ -d "${p}agents" ]; then
-      for f in "${p}agents"/*.md; do
+    pname=$(basename "$p"); root=$(pack_dir "$pname")
+    if [ -d "$root/agents" ]; then
+      for f in "$root/agents"/*.md; do
         [ -f "$f" ] || continue
         b=$(basename "$f")
         if [ -e ".claude/agents/$b" ]; then
           echo "warn: agent '$b' from pack '$pname' collides — skipped" >&2
         else
-          ln -s "../../.packs/$pname/agents/$b" ".claude/agents/$b"
+          ln -s "../../$root/agents/$b" ".claude/agents/$b"
         fi
       done
     fi
-    if [ -d "${p}hooks" ]; then
-      ln -sfn "../../.packs/$pname/hooks" ".claude/hooks/$pname"
+    if [ -d "$root/hooks" ]; then
+      ln -sfn "../../$root/hooks" ".claude/hooks/$pname"
       echo "hooks from '$pname' staged at .claude/hooks/$pname — review and wire explicitly in .claude/settings.json (never auto-enabled)"
     fi
   done
   echo ".claude/ enriched — $(find .claude/skills -maxdepth 1 -type l | wc -l | tr -d ' ') skills, $(find .claude/agents -maxdepth 1 -type l | wc -l | tr -d ' ') agents"
+}
+
+# A pack that lives in a subdirectory of a bigger repository checks out only that directory
+# (cone mode keeps the repository's top-level files). Best effort: a git without sparse-checkout
+# gets the whole tree, which only costs space; the pack is read from the same path either way.
+sparse_pack() { # <name>
+  local sub; sub=$(pack_subpath "$1")
+  [ -n "$sub" ] && [ -e ".packs/$1/.git" ] || return 0
+  git -C ".packs/$1" sparse-checkout set --cone "$sub" >/dev/null 2>&1 || true
 }
 
 cmd_add() {
@@ -380,6 +447,8 @@ cmd_add() {
     echo "warn: '$name' is not from the curated registry — provenance unverified" >&2
   fi
   git submodule add -f "$url" ".packs/$name"
+  sparse_pack "$name"
+  [ -d "$(pack_dir "$name")" ] || die "pack '$name': $(pack_subpath "$name") is not in $url — the registry's (or the manifest's) path is wrong"
   manifest_add "$name" "${2:-}"
   [ "$DEFER_SYNC" = 1 ] || cmd_sync
   echo "mounted. Review, then: git add .gitmodules .packs.yaml .packs/$name && git commit (the skills/ and .claude/ links are generated and excluded from git)"
@@ -408,6 +477,8 @@ DEFER_SYNC=0   # apply sets it: one union rebuild at the end, not one per pack
 cmd_apply() {
   local name p failed=""
   DEFER_SYNC=1
+  check_paths
+  warn_deprecated
   refuse_found "$(plugin_drift apply)"   # a plugin pack is never mounted back, an unknown mode never guessed
   # A fresh clone or worktree carries the pins as empty dirs, and a pull or branch switch
   # can move a gitlink under an initialised mount: check both out at their recorded pin.
@@ -416,6 +487,7 @@ cmd_apply() {
     if ! is_plugin "$name" && [ -d "$p" ] && [ ! -L "$p" ] && [ -z "$(ls -A "$p")" ]; then
       echo "apply: initialising '$name'"
       git submodule update --init -- "$p" || true
+      sparse_pack "$name"
     fi
   done
   for p in $(pin_drift | sed -n 's/^stale mount: \([^ ]*\) .*/\1/p'); do
@@ -467,9 +539,44 @@ cmd_list() {
     [ -d "$p" ] || { echo "no packs mounted${plugins:+ as submodules}"; return; }
     pname=$(basename "$p")
     pin=$(git -C "$p" rev-parse --short HEAD 2>/dev/null || echo "?")
-    n=$(pack_skill_dirs ".packs/$pname" | wc -l | tr -d ' ')
+    n=$(pack_skill_dirs "$(pack_dir "$pname")" | wc -l | tr -d ' ')
     echo "$pname  @$pin  ($n skills)"
   done
+}
+
+# `git mv` of a submodule updates the module's shared config but not its per-worktree one, which a
+# sparse checkout creates: its core.worktree would still name the old directory.
+repoint_worktree() { # <new name>
+  local gd wt
+  gd=$(sed -n 's/^gitdir: //p' ".packs/$1/.git" 2>/dev/null) || return 0
+  [ -n "$gd" ] && [ -f ".packs/$1/$gd/config.worktree" ] || return 0
+  wt=$(git config --file ".packs/$1/$gd/config.worktree" --get core.worktree 2>/dev/null) || return 0
+  git config --file ".packs/$1/$gd/config.worktree" core.worktree "${wt%/*}/$1"
+}
+
+# Rewrite an instance keyed by renamed packs to the registry's keys: the manifest entry (config
+# block and all) under its new key, and a mounted submodule moved to .packs/<new>. Nothing is
+# guessed: a pack whose old and new keys both appear, or whose new mount path is taken, stops it.
+cmd_migrate() {
+  [ -f "$MANIFEST" ] || die "migrate: there is no $MANIFEST here"
+  local old new moved=0
+  for old in $(manifest_names); do
+    new=$(registry_name "$old"); [ "$new" != "$old" ] || continue
+    manifest_names | grep -qx -- "$new" && die "migrate: both '$old' and '$new' are in $MANIFEST — merge the two entries by hand, then re-run"
+    { [ -e ".packs/$new" ] || [ -L ".packs/$new" ]; } && die "migrate: .packs/$new already exists — remove it, then re-run"
+    awk -v o="$old" -v n="$new" '$0 == "  " o ":" { print "  " n ":"; next } { print }' "$MANIFEST" > "$MANIFEST.tmp" && mv "$MANIFEST.tmp" "$MANIFEST"
+    if [ -n "$(git ls-files -s -- ".packs/$old" 2>/dev/null)" ]; then
+      git mv ".packs/$old" ".packs/$new"
+      repoint_worktree "$new"
+    elif [ -e ".packs/$old" ] || [ -L ".packs/$old" ]; then
+      mv ".packs/$old" ".packs/$new"
+    fi
+    echo "migrate: $old -> $new"
+    moved=$((moved + 1))
+  done
+  if [ "$moved" = 0 ]; then echo "migrate: nothing to do — every key in $MANIFEST is current"; return; fi
+  cmd_sync
+  echo "migrated $moved pack(s). Review, then: git add -A .gitmodules .packs .packs.yaml && git commit (the skills/ and .claude/ links are generated and excluded from git)"
 }
 
 case "${1:-}" in
@@ -481,5 +588,6 @@ case "${1:-}" in
   apply) cmd_apply ;;
   check) cmd_check ;;
   config) shift; cmd_config "$@" ;;
-  *) echo "usage: $0 add <name> [repo-url] | remove <name> | update [name] | list | sync | apply | check | config <pack> [key]" >&2; exit 1 ;;
+  migrate) cmd_migrate ;;
+  *) echo "usage: $0 add <name> [repo-url] | remove <name> | update [name] | list | sync | apply | check | config <pack> [key] | migrate" >&2; exit 1 ;;
 esac

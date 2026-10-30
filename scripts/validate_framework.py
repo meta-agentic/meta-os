@@ -476,7 +476,7 @@ def check_index_resolves(findings: list[Finding]) -> dict[str, str]:
     pack-provided row the gate cannot read is a finding of its own. Returns the
     pack-provided entries.
     """
-    from pack_registry import mounted_packs, pack_table, provided_skills   # lazy, as in index_entries()
+    from pack_registry import mounted_packs, pack_table, provided_skills, registry_paths   # lazy, as in index_entries()
     on_disk = {d.name for d in skill_dirs()}
     if SKILLS_DIR.is_dir():
         on_disk |= {d.name for d in SKILLS_DIR.iterdir()
@@ -486,7 +486,7 @@ def check_index_resolves(findings: list[Finding]) -> dict[str, str]:
     if SKILLS_INDEX.is_file():
         findings.extend(Finding("index-pack-table", "skills/_index.md", p)
                         for p in pack_table(SKILLS_INDEX.read_text(encoding="utf-8"))[1])
-    mounted, pack_provided = mounted_packs(PACKS_DIR), {}
+    mounted, pack_provided = mounted_packs(PACKS_DIR, registry_paths(PACKS_REGISTRY)), {}
     on_disk |= set().union(*mounted.values())
     for name in sorted(index_entries()):
         pack = provided.get(name)

@@ -48,11 +48,12 @@ instance's `.packs.yaml`; `scripts/packs.sh add <pack>` resolves the dependency.
 
 ## Install
 
-```bash
-# in a meta-os instance
-scripts/packs.sh add <pack> https://github.com/meta-agentic/meta-discipline-<pack>
-scripts/packs.sh config <pack>      # resolve/validate config
+```text
+/plugin marketplace add meta-agentic/meta-disciplines
+/plugin install meta-discipline-<pack> --marketplace meta-agentic/meta-disciplines
 ```
+
+In a meta-os instance: `scripts/packs.sh add meta-discipline-<pack>` (a submodule mount, sparse down to the pack's directory) or `install: plugin` in `.packs.yaml`; `scripts/packs.sh config meta-discipline-<pack>` resolves and validates the config.
 
 ## Provenance & license
 
@@ -62,8 +63,9 @@ construction: no instance data.
 ## Registry entry (add to `meta-os/systems/packs.yaml`)
 
 ```yaml
-  <pack>:
-    repo: https://github.com/meta-agentic/meta-discipline-<pack>
+  meta-discipline-<pack>:
+    repo: https://github.com/meta-agentic/meta-disciplines
+    path: plugins/meta-discipline-<pack>
     ref: main
     description: "<the pack.yaml description, trimmed>"
     provenance: first-party

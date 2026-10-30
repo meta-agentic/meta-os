@@ -3,7 +3,7 @@
 # resolves instance .packs.yaml `config:` over these and validates enums.
 # Contract: meta-os/systems/pack.schema.json — validate before publishing.
 version: 1
-name: <pack>
+name: meta-discipline-<pack>
 description: "<Discipline> discipline (<N> skills): a <rigor spine — the cross-cutting method skills> plus <branch disciplines> — each emitting a checkable ledger. <Coverage anchored on … , if a reference taxonomy was used.>"
 provenance: first-party
 license: MIT

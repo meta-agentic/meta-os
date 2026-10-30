@@ -20,7 +20,7 @@ whole library — never create a second real copy; discovery is via symlinks.
 | [[skills/pack-builder/SKILL\|pack-builder]] | Meta | Author a new pack: apply the is-it-a-pack test, structure (pack.yaml/profiles), parameterise, provenance/registry, verify by mounting — see [[systems/pack-strategy]] |
 | [[skills/bootstrap-instance/SKILL\|bootstrap-instance]] | Meta | One-time onboarding for a fresh instance repo: backlog/tracking model, first project, GitHub integration |
 | `hooks-automation` | Automation | **→ removed, third-party.** It documented claude-flow's own hook CLI; install that upstream (`npx @claude-flow/cli@latest init`) if you want it. The framework's hook *policy* — staged per pack, never auto-wired — is in [[systems/packs]] |
-| `swarm-orchestration` | Orchestration | **→ removed, third-party.** Coordination inside a session belongs to the host engine ([[systems/engine]]); the OS's own parallel model is [[systems/swarm-harness]], driven by the [agile pack](https://github.com/meta-agentic/meta-discipline-agile)'s `agile-swarm` |
+| `swarm-orchestration` | Orchestration | **→ removed, third-party.** Coordination inside a session belongs to the host engine ([[systems/engine]]); the OS's own parallel model is [[systems/swarm-harness]], driven by the [agile pack](https://github.com/meta-agentic/meta-disciplines/tree/main/plugins/meta-discipline-agile)'s `agile-swarm` |
 | [[skills/multi-engine/SKILL\|multi-engine]] | Meta | Cross-provider headless fan-out via meta-cli (`claude`/`gemini`/`grok`/…); collect → `memory/raw/` — see [[systems/engine]] |
 | [[skills/infoviz/SKILL\|infoviz]] | Data | Choose the RIGHT visual form before drawing it — chart/encoding selection from data + task, and method choice for complex data (network, hierarchy, flow, temporal, geospatial); hands off to styling |
 
@@ -30,8 +30,8 @@ Skills a pack ships rather than this folder, catalogued here because the core sh
 
 | Skill | Pack | Plugin | Use for |
 |-------|------|--------|---------|
-| `agile-process` | [agile](https://github.com/meta-agentic/meta-discipline-agile) | `meta-discipline-agile@meta-agentic` | Backlog of record, ceremonies, transitions — transition ledger |
-| `agile-swarm` | [agile](https://github.com/meta-agentic/meta-discipline-agile) | `meta-discipline-agile@meta-agentic` | Multi-lane sprint execution — lane ledger |
+| `agile-process` | [meta-discipline-agile](https://github.com/meta-agentic/meta-disciplines/tree/main/plugins/meta-discipline-agile) | `meta-discipline-agile@meta-agentic` | Backlog of record, ceremonies, transitions — transition ledger |
+| `agile-swarm` | [meta-discipline-agile](https://github.com/meta-agentic/meta-disciplines/tree/main/plugins/meta-discipline-agile) | `meta-discipline-agile@meta-agentic` | Multi-lane sprint execution — lane ledger |
 
 ## What is deliberately not here
 

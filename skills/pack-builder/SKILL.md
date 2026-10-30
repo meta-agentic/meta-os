@@ -137,8 +137,8 @@ prove it works before publishing:
   checklist — every required file present, a `profiles/<name>.md` per declared profile,
   and each skill carrying the front-matter and `##` sections the checklist names. Do this
   first: it is cheap, and it catches the drift that reading another pack by eye does not.
-- `scripts/packs.sh add <pack> <url>` — the **instance template's** script, run from an
-  instance, not from meta-os (then by registry name once listed). Skills land in the union
+- `scripts/packs.sh add <pack> <url>` — run from an instance, not from meta-os (then by
+  registry name once listed; a first-party pack in the monorepo carries `path:` in its entry). Skills land in the union
   `skills/` and `.claude/skills/`; nested/plugin layouts resolve; collisions shadow as
   expected; declared dependencies resolve and mount.
 - `scripts/packs.sh config <pack>` (instance template) — defaults resolve, enums validate,

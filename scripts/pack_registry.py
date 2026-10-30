@@ -62,22 +62,45 @@ def provided_skills(registry: Path) -> tuple[dict[str, str], list[str]]:
     return out, problems
 
 
-def mounted_packs(packs_dir: Path) -> dict[str, set[str]]:
+def registry_paths(registry: Path) -> dict[str, str]:
+    """Each registry key (and each key it used to have, `renamed-from:`) -> the pack's directory
+    inside its repository, for a pack that lives in a subdirectory of a bigger one. Best effort:
+    `provided_skills` already reports an unreadable registry, so here it just yields nothing."""
+    try:
+        packs = (yaml.safe_load(registry.read_text(encoding="utf-8")) or {}).get("packs")
+    except (OSError, yaml.YAMLError, AttributeError):
+        return {}
+    out: dict[str, str] = {}
+    for pack, entry in (packs.items() if isinstance(packs, dict) else []):
+        path = entry.get("path") if isinstance(entry, dict) else None
+        if isinstance(path, str) and path.strip("/"):
+            for key in [str(pack), *(str(k) for k in entry.get("renamed-from") or [])]:
+                out[key] = path.strip("/")
+    return out
+
+
+def mounted_packs(packs_dir: Path, subpaths: dict[str, str] | None = None) -> dict[str, set[str]]:
     """Each mount with content under `.packs/` -> the skill names it ships.
 
     Discovered as `scripts/packs.sh` (pack_skill_dirs) discovers them: the `./…` paths of
     `.claude-plugin/plugin.json` when the pack has one, otherwise every `SKILL.md` at any depth.
+    A pack that lives in a subdirectory of its repository (`subpaths`, from `registry_paths`) is
+    read from that directory, never from the whole mount: a sibling pack's skills are not its own.
     """
     out: dict[str, set[str]] = {}
     for d in sorted(packs_dir.iterdir()) if packs_dir.is_dir() else []:
         if not d.is_dir() or not any(d.iterdir()):
             continue
-        manifest = d / ".claude-plugin" / "plugin.json"
+        root = d / (subpaths or {}).get(d.name, "")
+        if not root.is_dir():
+            out[d.name] = set()
+            continue
+        manifest = root / ".claude-plugin" / "plugin.json"
         if manifest.is_file():
             rels = re.findall(r'"\./([^"]*)"', manifest.read_text(encoding="utf-8", errors="replace"))
-            out[d.name] = {Path(r).name for r in rels if (d / r / "SKILL.md").is_file()}
+            out[d.name] = {Path(r).name for r in rels if (root / r / "SKILL.md").is_file()}
         else:
-            out[d.name] = {f.parent.name for f in d.rglob("SKILL.md") if ".git" not in f.relative_to(d).parts}
+            out[d.name] = {f.parent.name for f in root.rglob("SKILL.md") if ".git" not in f.relative_to(root).parts}
     return out
 
 

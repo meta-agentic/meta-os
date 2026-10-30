@@ -123,6 +123,29 @@ class IndexResolvesTest(unittest.TestCase):
         self.assertEqual(phantoms, set())
         self.assertEqual(provided, {}, "a linked skill resolves on disk, not from the registry")
 
+    def monorepo(self, mount: str = "mono-a") -> None:
+        """A registry pack that lives in plugins/mono-a of a repository that also holds plugins/mono-b."""
+        self.registry.write_text(REGISTRY + "  mono-a:\n    renamed-from: [old-a]\n    repo: https://example.invalid/mono\n"
+                                 "    path: plugins/mono-a\n    provides: [omega]\n    status: available\n")
+        base = self.tmp / ".packs" / mount
+        for pack, skill in (("mono-a", "omega"), ("mono-b", "zeta")):
+            (base / "plugins" / pack / "skills" / skill).mkdir(parents=True)
+            (base / "plugins" / pack / "skills" / skill / "SKILL.md").write_text(f"---\nname: {skill}\n---\n")
+        (base / ".git").write_text("gitdir: elsewhere\n")
+
+    def test_a_pack_in_a_monorepo_answers_for_its_own_directory_only(self):
+        self.monorepo()
+        self.catalog("core-skill", "omega", "zeta")
+        phantoms, provided = self.phantoms()
+        self.assertEqual(phantoms, {"zeta"}, "a sibling pack's skill is not what this mount ships")
+        self.assertNotIn("omega", provided, "omega resolves from the mount's own tree")
+
+    def test_a_mount_still_under_a_renamed_key_is_read_from_the_same_directory(self):
+        self.monorepo(mount="old-a")
+        self.catalog("core-skill", "omega", "zeta")
+        phantoms, _ = self.phantoms()
+        self.assertEqual(phantoms, {"zeta"})
+
     def test_an_uninitialised_submodule_is_not_a_mount(self):
         # what a CI checkout without `submodules:` holds: an empty .packs/<pack>/, no links
         (self.tmp / ".packs" / "agile").mkdir(parents=True)

@@ -448,10 +448,11 @@ sync_claude() {
 sparse_pack() { # <name>
   local sub err; sub=$(pack_subpath "$1")
   [ -n "$sub" ] && [ -e ".packs/$1/.git" ] || return 0
-  local rc=0; git sparse-checkout -h >/dev/null 2>&1 || rc=$?
-  [ "$rc" = 129 ] || return 0                                             # a git without sparse-checkout: the whole tree
-  err=$(git -C ".packs/$1" sparse-checkout set --cone -- "$sub" 2>&1) \
-    || echo "warn: pack '$1': sparse checkout of $sub failed (the whole tree is checked out): $(printf '%s' "$err" | tail -n 1)" >&2
+  # Run it and read the answer: probing `-h` first guessed at an exit code that newer gits do not give,
+  # and silently skipped the sparse checkout there. A git too old to have the command says so.
+  err=$(git -C ".packs/$1" sparse-checkout set --cone -- "$sub" 2>&1) && return 0
+  case "$err" in *"not a git command"*|*"is not a git"*) return 0 ;; esac   # the whole tree: only costs space
+  echo "warn: pack '$1': sparse checkout of $sub failed (the whole tree is checked out): $(printf '%s' "$err" | tail -n 1)" >&2
 }
 # Take a submodule that was just added back out, so a refused add leaves nothing recorded.
 unmount_half() { # <name>

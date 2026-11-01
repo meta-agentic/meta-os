@@ -273,6 +273,43 @@ class AdoptTest(lifecycle.LifecycleTest):
             self.assertEqual(before, self.fingerprint(inst))
         self.assertNotIn("v2 line", (inst / "systems" / "engine.md").read_text())
 
+    def test_a_symlinked_gitignore_git_never_read_is_reported_when_its_rules_start_to_apply(self):
+        """git ignores a symlinked .gitignore, so its rules were never in effect; moved to
+        .gitignore.instance they are, and a file they match stops showing in `git status`."""
+        inst = self.tmp / "linked-ignore"
+        self.write(inst, "ignore.txt", "local-cache/\n*.scratch\n")
+        (inst / ".gitignore").symlink_to("ignore.txt")
+        self.write(inst, "notes/a.md", "a\n")
+        git(inst, "init", "-q", "-b", "main")
+        git(inst, "add", "-A"); git(inst, "commit", "-q", "-m", "linked ignore")
+        git(inst, "remote", "add", "upstream", str(self.upstream))
+        git(inst, "fetch", "-q", "upstream")
+        self.write(inst, "local-cache/blob.bin", "x\n")
+        self.write(inst, "draft.scratch", "x\n")
+        self.write(inst, "keep.txt", "visible either way\n")
+        self.assertIn("?? local-cache/", git(inst, "status", "--porcelain"), "git never read the link")
+        out = self.adopt(inst, "--dry-run").stdout
+        self.assertIn("newly effective: local-cache/", out)
+        self.assertIn("local-cache/blob.bin", out)
+        self.assertIn("newly effective: *.scratch", out)
+        self.assertIn("hides 1 untracked file(s)", out)
+        self.assertNotIn("keep.txt", out)
+        r = self.adopt(inst)
+        self.assertIn("newly effective: local-cache/", r.stdout)
+        status = git(inst, "status", "--porcelain")
+        self.assertNotIn("local-cache", status)
+        self.assertIn("keep.txt", status)
+
+    def test_a_real_gitignore_reports_nothing_as_newly_effective(self):
+        inst = self.tmp / "real-ignore"
+        self.write(inst, ".gitignore", "local-cache/\n")
+        git(inst, "init", "-q", "-b", "main")
+        git(inst, "add", "-A"); git(inst, "commit", "-q", "-m", "real ignore")
+        git(inst, "remote", "add", "upstream", str(self.upstream))
+        git(inst, "fetch", "-q", "upstream")
+        self.write(inst, "local-cache/blob.bin", "x\n")
+        self.assertNotIn("newly effective", self.adopt(inst, "--dry-run").stdout)
+
     def test_symlinked_instance_files_at_framework_file_paths_keep_their_content(self):
         inst = self.tmp / "linked"
         self.write(inst, "tools/gate.sh", "#!/bin/sh\necho INSTANCE-GATE >&2\nexit 1\n", 0o755)

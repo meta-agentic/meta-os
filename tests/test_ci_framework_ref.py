@@ -156,6 +156,11 @@ class CiFrameworkRefTest(unittest.TestCase):
                 "https://x-access-token@github.com/meta-agentic/meta-os"]
         self.assertEqual({normalise_url(u) for u in same}, {"github.com/meta-agentic/meta-os"})
         self.assertEqual(normalise_url("file:///srv/fw/"), normalise_url("/srv/fw"))
+        # a port is not part of the name (ssh://host:22/...), but the colon of the scp-like form is the path's
+        ported = ["ssh://git@github.com:22/meta-agentic/meta-os.git", "ssh://git@github.com:2222/Meta-Agentic/meta-os/",
+                  "ssh://github.com:443/meta-agentic/meta-os", "https://github.com:443/meta-agentic/meta-os.git"]
+        self.assertEqual({normalise_url(u) for u in ported}, {"github.com/meta-agentic/meta-os"})
+        self.assertEqual(normalise_url("git@github.com:22/x"), "github.com/22/x")
         self.assertNotEqual(normalise_url("https://github.com/someone/meta-os"),
                             normalise_url("https://github.com/meta-agentic/meta-os"))
 
@@ -191,12 +196,13 @@ class FrameworkGateNeverNarrowsInItsOwnRepository(unittest.TestCase):
         git(self.fw, "add", "-A")
         git(self.fw, "commit", "-q", "-m", "framework")
 
-    def change_with_contract_and_leak(self, origin: str) -> Path:
+    def change_with_contract_and_leak(self, origin: str, upstream: bool = True) -> Path:
         pr = self.tmp / "pr"
         git(self.tmp, "clone", "-q", str(self.fw), str(pr))
         git(pr, "remote", "set-url", "origin", origin)
-        git(pr, "remote", "add", "upstream", str(self.fw))
-        git(pr, "fetch", "-q", "upstream")
+        if upstream:
+            git(pr, "remote", "add", "upstream", str(self.fw))
+            git(pr, "fetch", "-q", "upstream")
         key, home = "AB" + "C-12" + "3", "/Us" + "ers/" + "someone/notes"   # never committed here
         commit(pr, {".claude/CLAUDE.md": "# not an instance\n",
                     "systems/new-note.md": f"---\ntype: note\n---\nsee {key} in {home}\n"}, "change")
@@ -215,6 +221,33 @@ class FrameworkGateNeverNarrowsInItsOwnRepository(unittest.TestCase):
                 self.assertNotIn("instance: checking the framework's paths", gate.stdout)
                 listed = run(["python3", "scripts/run_tests.py", "--list"], pr)
                 self.assertEqual(listed.stdout.split(), ["pipeline/tests", "tests"], listed.stderr)
+
+    def test_a_file_clone_of_a_local_copy_is_the_framework_once_upstream_says_so(self):
+        """The documented remedy for the one case the gate cannot see. A clone whose origin is a local
+        copy, not the public repository, reads as an instance, and a leak under a path the instance
+        template owns (`projects/`) passes. `upstream` set to that same URL marks it as the framework."""
+        copy = self.tmp / "copy"
+        git(self.tmp, "clone", "-q", str(self.fw), str(copy))
+        env = {k: v for k, v in os.environ.items() if k != "GITHUB_REPOSITORY"}
+        key, home = "AB" + "C-12" + "3", "/Us" + "ers/" + "someone/notes"
+        for scheme in ("file://", ""):
+            with self.subTest(scheme=scheme):
+                shutil.rmtree(self.tmp / "pr", ignore_errors=True)
+                pr = self.tmp / "pr"
+                git(self.tmp, "clone", "-q", str(self.fw), str(pr))
+                git(pr, "remote", "set-url", "origin", f"{scheme}{copy}")
+                commit(pr, {".claude/CLAUDE.md": "# not an instance\n",
+                            "projects/leak.md": f"---\ntype: note\ntags: [x]\n---\nsee {key} in {home}\n"}, "change")
+
+                def gate():
+                    return subprocess.run(["python3", "scripts/validate_framework.py"], cwd=pr, capture_output=True,
+                                          text=True, env=env)
+                unlabelled = gate()
+                self.assertEqual(unlabelled.returncode, 0, "the documented limit: it reads as an instance\n" + unlabelled.stdout)
+                git(pr, "remote", "add", "upstream", git(pr, "remote", "get-url", "origin"))
+                fixed = gate()
+                self.assertNotEqual(fixed.returncode, 0, fixed.stdout)
+                self.assertIn("projects/leak.md", fixed.stdout)
 
 
 if __name__ == "__main__":

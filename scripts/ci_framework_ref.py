@@ -23,6 +23,13 @@ framework's. This prepares the checkout the way a clone already is:
     the gate run on a guessed scope.
 
 The URL is `--url`, else `$META_OS_UPSTREAM_URL`, else the canonical framework.
+
+One checkout cannot be told apart by looking: a clone whose `origin` is only a local path or a
+`file://` URL (a copy of the framework on this machine) is the framework with a change on top, or
+an instance cloned from that copy with its own commits; both add a tracked `.claude/CLAUDE.md` to
+the same history. The gate does not guess. Say which it is: in the framework's clone,
+`git remote add upstream "$(git remote get-url origin)"` (an `upstream` that is `origin` marks the
+checkout as the framework itself), or set `origin` to the public repository.
 """
 from __future__ import annotations
 
@@ -39,15 +46,20 @@ REMOTE, BRANCH = "upstream", "main"
 
 
 def normalise_url(url: str) -> str:
-    """A repository URL compared by what it names: no scheme, user, case, `.git` or `/` at the end.
+    """A repository URL compared by what it names: no scheme, user, port, case, `.git` or `/` at the end.
 
-    `https://github.com/O/R.git`, `git@github.com:O/R` and `ssh://git@github.com/O/R/` all
-    give `github.com/o/r`; `file:///p` and `/p` give `/p`.
+    `https://github.com/O/R.git`, `git@github.com:O/R`, `ssh://git@github.com/O/R/` and
+    `ssh://git@github.com:22/O/R` all give `github.com/o/r`; `file:///p` and `/p` give `/p`.
+    A port belongs to a URL with a scheme; in the scp-like form the colon starts the path.
     """
     u = url.strip().lower()
-    u = re.sub(r"^[^/@:]+@([^:/]+):", r"\1/", u)    # scp-like: git@host:path
-    u = re.sub(r"^[a-z][a-z0-9+.-]*://", "", u)      # https:// ssh:// file:// git://
-    u = re.sub(r"^[^/@]+@", "", u)                     # user@host
+    scp = re.match(r"^[^/@:]+@([^:/]+):(?!//)", u)
+    if scp:
+        u = re.sub(r"^[^/@:]+@([^:/]+):", r"\1/", u)    # scp-like: git@host:path
+    else:
+        u = re.sub(r"^[a-z][a-z0-9+.-]*://", "", u)       # https:// ssh:// file:// git://
+        u = re.sub(r"^[^/@]+@", "", u)                      # user@host
+        u = re.sub(r"^([^/:]+):\d+(?=/|$)", r"\1", u)      # host:port
     u = u.rstrip("/")
     return (u[:-4] if u.endswith(".git") else u).rstrip("/")
 

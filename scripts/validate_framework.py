@@ -50,10 +50,7 @@ template's instance paths", and the gate says so.
 from __future__ import annotations
 
 import argparse
-import functools
-import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -61,6 +58,19 @@ try:
     import yaml
 except ModuleNotFoundError:  # pragma: no cover
     sys.exit("PyYAML required: pip3 install pyyaml")
+
+# The gate is split by concern, in sibling modules (they ship together in scripts/): which
+# paths it judges, what a finding is and the baseline, and the public-safety scan. Their names
+# are imported here, so this module stays the one place the rest of scripts/ imports from.
+from framework_findings import BASELINE, BASELINEABLE, Finding, read_baseline, write_baseline  # noqa: F401
+from framework_safety import (  # noqa: F401
+    ABS_HOME_RE, PUBLIC_SAFETY_ALLOWED_TOKENS, TEXT_SUFFIXES, TRACKER_KEY_RE, check_public_safety,
+)
+from framework_scope import (  # noqa: F401
+    INSTANCE_ONLY_EXTRA, INSTANCE_TEMPLATE_ROOT, _git, check_instance_paths_untracked, framework_scope,
+    instance_mode, instance_paths, is_instance_path, is_own_framework, own_framework_tracking_contract,
+    tracked_files, tracked_instance_paths,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 SKILLS_DIR = ROOT / "skills"
@@ -70,100 +80,9 @@ SYSTEMS_DIR = ROOT / "systems"
 ONTOLOGY = SYSTEMS_DIR / "ontology.yaml"
 PACKS_REGISTRY = SYSTEMS_DIR / "packs.yaml"
 PACKS_DIR = ROOT / ".packs"
-BASELINE = ROOT / "scripts" / "framework-baseline.txt"
 
 INDEX_NAME = "_index.md"
 SKILL_NAME = "SKILL.md"
-
-# ---------------------------------------------------------------------------
-# Instance paths — derived, not declared. Every top-level entry of the instance
-# template's payload lands at the same path under the repository root when an
-# instance is bootstrapped, and from then on that path is the instance's. The
-# framework may not track one; the gate may not judge one. Two paths the payload
-# does not carry but the mount mechanism creates are added explicitly: the pack
-# mounts and the submodule manifest `git submodule add` writes.
-# ---------------------------------------------------------------------------
-INSTANCE_TEMPLATE_ROOT = ROOT / "instance-template" / "root"
-INSTANCE_ONLY_EXTRA = frozenset({".packs", ".gitmodules"})
-
-
-def instance_paths() -> frozenset[str]:
-    """Top-level names owned by an instance: the payload's entries plus the mounts."""
-    names = set(INSTANCE_ONLY_EXTRA)
-    if INSTANCE_TEMPLATE_ROOT.is_dir():
-        names.update(p.name for p in INSTANCE_TEMPLATE_ROOT.iterdir())
-    return frozenset(names)
-
-
-def is_instance_path(rel: Path) -> bool:
-    return bool(rel.parts) and rel.parts[0] in instance_paths()
-
-
-# A bootstrapped checkout carries the instance contract; the framework repository
-# never does. In instance mode the checks that cannot tell a framework skill from
-# the instance's own are narrowed to what the catalog declares (see
-# check_skill_registration) and the count assertion is skipped.
-def instance_mode() -> bool:
-    return (ROOT / ".claude" / "CLAUDE.md").is_file()
-
-
-def _git(*args: str) -> str | None:
-    try:
-        return subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True,
-                              check=True, text=True).stdout
-    except (OSError, subprocess.CalledProcessError):
-        return None
-
-
-def is_own_framework() -> bool:
-    """Is this checkout the framework repository itself, whatever it tracks?
-
-    True when `origin` is the canonical framework, or when `upstream` is the same repository
-    as `origin`. A change to the framework that tracks `.claude/CLAUDE.md` must not turn its
-    own gate into an instance's: scoped to `main`, every file the change adds would escape it.
-    """
-    from ci_framework_ref import CANONICAL_URL, normalise_url
-    origin = _git("remote", "get-url", "origin")
-    if origin is None:
-        return False
-    upstream = _git("remote", "get-url", "upstream")
-    mine = normalise_url(origin)
-    return mine == normalise_url(CANONICAL_URL) or (upstream is not None and mine == normalise_url(upstream))
-
-
-def own_framework_tracking_contract() -> bool:
-    """The framework repository itself, with `.claude/CLAUDE.md` tracked: never an instance."""
-    return (_git("ls-files", "--error-unmatch", ".claude/CLAUDE.md") is not None
-            and is_own_framework())
-
-
-@functools.lru_cache(maxsize=None)
-def framework_scope() -> tuple[str, frozenset[str], frozenset[str]] | None:
-    """In an instance: (ref, files, folders) the framework tracks at the last merged commit.
-
-    None outside an instance (everything tracked is the framework's) and when no
-    framework ref is reachable (the template-derived fallback applies). An instance
-    COMMITS its contract; a framework developer's checkout (`bootstrap.sh --local`)
-    only has it on disk, excluded — and must keep the full scope, or a file added on
-    a branch there would escape the gate whenever an `upstream` remote exists.
-    """
-    if not instance_mode() or _git("ls-files", "--error-unmatch", ".claude/CLAUDE.md") is None:
-        return None
-    if is_own_framework():
-        return None
-    # An override can only widen the scope: the merge base with upstream/main still counts,
-    # so a stale $META_OS_FRAMEWORK_REF cannot hide a file the framework added since.
-    refs = dict.fromkeys(r for r in (os.environ.get("META_OS_FRAMEWORK_REF"), "upstream/main") if r)
-    bases = [b.strip() for b in (_git("merge-base", "HEAD", r) for r in refs) if b]
-    names: set[str] = set()
-    for base in bases:
-        names.update(n for n in (_git("ls-tree", "-r", "-z", "--name-only", base) or "").split("\0") if n)
-    if not names:
-        return None
-    files = frozenset(names)
-    folders = frozenset("/".join(Path(n).parts[:i]) for n in files
-                        for i in range(1, len(Path(n).parts)))
-    return " + ".join(b[:12] for b in dict.fromkeys(bases)), files, folders
 
 # ---------------------------------------------------------------------------
 # The `_index.md` convention, and the one ambiguity in it — resolved here.
@@ -203,34 +122,6 @@ FIXTURES_DIR = ROOT / "tests" / "fixtures"
 TOOL_DIRS = {"__pycache__"}
 
 # ---------------------------------------------------------------------------
-# Public-safety scan. This repo is public; a leaked instance identifier is not
-# retractable once pushed, so this class NEVER enters the baseline (see
-# BASELINEABLE) and NEVER downgrades to a warning.
-# ---------------------------------------------------------------------------
-# `<PREFIX>-<number>` at a token boundary — the shape of an instance tracker key.
-TRACKER_KEY_RE = re.compile(r"(?<![A-Za-z0-9])([A-Z]{2,5}-[0-9]+)")
-# An absolute macOS home path — a machine path, i.e. instance data.
-ABS_HOME_RE = re.compile(r"/Users/[A-Za-z0-9._-]+")
-
-# Narrow allow-list for the tracker-key pattern: EXACT tokens only, never
-# prefixes and never regex, so widening it is always a visible one-line diff.
-# Add a token here only when it is a published standard/encoding identifier that
-# merely happens to look like a tracker key. Never add a real key: the correct
-# fix for a real key is to remove it from the file.
-PUBLIC_SAFETY_ALLOWED_TOKENS = frozenset({
-    "UTF-8", "UTF-16", "UTF-32",     # character encodings
-    "ISO-8601", "ISO-8859",          # date/charset standards
-    "RFC-3339", "RFC-7231",          # IETF documents
-    "SHA-1", "SHA-256", "SHA-512",   # digest algorithms
-    "AES-128", "AES-256",            # ciphers
-    "MIT-0",                         # SPDX licence identifier
-})
-# File suffixes worth scanning as text. Everything else (images, binaries) is
-# skipped rather than decoded.
-TEXT_SUFFIXES = {".md", ".markdown", ".yaml", ".yml", ".json", ".py", ".sh",
-                 ".txt", ".toml", ".cfg", ".ini", ".xml", ".iml", ".js", ".ts", ""}
-
-# ---------------------------------------------------------------------------
 # Count assertions: prose claims that a machine can re-derive. Deliberately an
 # explicit, tiny list rather than a regex sweep of every number in every doc —
 # the scope of this check has to be obvious from reading it, or it becomes the
@@ -242,26 +133,6 @@ COUNT_ASSERTIONS = (
     ("README.md", re.compile(r"skill library \((\d+) skills?\)"),
      "skill directories in skills/"),
 )
-
-# Which classes may be silenced by the baseline. `public-safety` may not: a
-# public-repo leak is the one failure mode with no undo, so it fails the gate on
-# sight and its findings are never written to a committed file (that file would
-# then carry the very string being flagged).
-BASELINEABLE = {
-    "skill-provenance": True,
-    "skill-index": True,
-    "index-phantom": True,
-    "index-pack-table": True,
-    # An unreadable registry is not debt anyone should accept: it switches the check off.
-    "pack-registry": False,
-    "systems-front-matter": True,
-    "folder-index": True,
-    "count-assertion": True,
-    "public-safety": False,
-    # The framework tracking an instance path is the one way an upgrade can collide
-    # with an instance's files. Structural, so never tolerated as debt.
-    "instance-path-tracked": False,
-}
 
 
 def front_matter(path: Path):
@@ -277,21 +148,6 @@ def front_matter(path: Path):
     except yaml.YAMLError:
         return None
     return fm if isinstance(fm, dict) else None
-
-
-class Finding:
-    __slots__ = ("check", "path", "detail")
-
-    def __init__(self, check: str, path: str, detail: str):
-        self.check, self.path, self.detail = check, path, detail
-
-    @property
-    def key(self) -> str:
-        """Stable, greppable identity used by the baseline file."""
-        return f"{self.check}\t{self.path}\t{self.detail}"
-
-    def __str__(self) -> str:
-        return f"{self.path}: {self.detail}  [{self.check}]"
 
 
 # --- discovery helpers -----------------------------------------------------
@@ -383,42 +239,6 @@ def ontology_note_types() -> set[str]:
         return set()
     types = data.get("note_types")
     return set(types) if isinstance(types, dict) else set()
-
-
-def tracked_files() -> list[Path]:
-    """Files git tracks — the scan is about what this repo PUBLISHES.
-
-    Untracked and gitignored tool state (`.claude-flow/` session logs, IDE
-    workspace files) is full of id-shaped strings and is never published, so
-    asking git is both the correct scope and the cheap one. Outside a work tree
-    the walk falls back to the tree minus every dot-directory, which is the same
-    scope approximately.
-    """
-    try:
-        out = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"],
-                             capture_output=True, check=True).stdout
-        files = [ROOT / n for n in out.decode("utf-8").split("\0") if n]
-    except (OSError, subprocess.CalledProcessError):
-        files = [p for p in ROOT.rglob("*")
-                 if p.is_file()
-                 and not any(part.startswith(".") for part in p.relative_to(ROOT).parts[:-1])]
-    # An instance's own files are not the framework's to scan (and in the framework
-    # repository the layout check below is what catches one being tracked at all).
-    scope = framework_scope()
-    if scope:
-        return [p for p in files if p.relative_to(ROOT).as_posix() in scope[1]]
-    return [p for p in files if not is_instance_path(p.relative_to(ROOT))]
-
-
-def tracked_instance_paths() -> list[str]:
-    """Tracked paths that sit at an instance path — must be empty in the framework."""
-    try:
-        out = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"],
-                             capture_output=True, check=True).stdout
-    except (OSError, subprocess.CalledProcessError):
-        return []
-    return sorted(n for n in out.decode("utf-8").split("\0")
-                  if n and is_instance_path(Path(n)))
 
 
 def in_skill_subtree(d: Path) -> bool:
@@ -559,53 +379,6 @@ def check_folder_index(findings: list[Finding]) -> None:
                 f"folder has no {INDEX_NAME} (CLAUDE.md, Conventions)"))
 
 
-def check_public_safety(findings: list[Finding]) -> None:
-    """5. No instance identifiers in tracked content. Never baselined, never a warning."""
-    self_path = Path(__file__).resolve()
-    for p in tracked_files():
-        if p.resolve() == self_path or p == BASELINE:
-            continue          # the gate states the patterns it hunts for
-        if p.suffix.lower() not in TEXT_SUFFIXES or not p.is_file():
-            continue
-        try:
-            lines = p.read_text(encoding="utf-8").splitlines()
-        except (UnicodeDecodeError, OSError):
-            continue
-        rel = str(p.relative_to(ROOT))
-        for n, line in enumerate(lines, 1):
-            for token in TRACKER_KEY_RE.findall(line):
-                if token in PUBLIC_SAFETY_ALLOWED_TOKENS:
-                    continue
-                findings.append(Finding(
-                    "public-safety", f"{rel}:{n}",
-                    f"looks like an instance tracker key: {token!r} — this repo is public "
-                    f"(if it is a standards identifier, add the exact token to "
-                    f"PUBLIC_SAFETY_ALLOWED_TOKENS)"))
-            if ABS_HOME_RE.search(line):
-                findings.append(Finding(
-                    "public-safety", f"{rel}:{n}",
-                    "absolute /Users/ home path — a machine path is instance data"))
-
-
-def check_instance_paths_untracked(findings: list[Finding]) -> None:
-    """7. The framework tracks no file at an instance path.
-
-    The one-repository layout works only because the two owners' path sets are
-    disjoint: an upgrade is a merge of the framework's paths, and a merge cannot
-    touch a path the framework never tracks. This is the check that keeps the
-    sets disjoint. Skipped in an instance, where those paths are exactly what is
-    tracked, but not in the framework repository itself when it tracks the instance
-    contract: that is the very path this check exists to refuse.
-    """
-    if instance_mode() and not own_framework_tracking_contract():
-        return
-    for n in tracked_instance_paths():
-        findings.append(Finding(
-            "instance-path-tracked", n,
-            f"tracked at an instance path ({Path(n).parts[0]!r} is instantiated from "
-            f"instance-template/root/ and belongs to the instance from then on)"))
-
-
 def check_count_assertions(findings: list[Finding]) -> None:
     """6. Prose counts that a machine can re-derive actually match the tree."""
     if instance_mode():
@@ -627,31 +400,6 @@ def check_count_assertions(findings: list[Finding]) -> None:
 
 
 # --- baseline / reporting --------------------------------------------------
-
-def read_baseline() -> set[str]:
-    if not BASELINE.is_file():
-        return set()
-    return {ln.rstrip("\n") for ln in BASELINE.read_text(encoding="utf-8").splitlines()
-            if ln.strip() and not ln.startswith("#")}
-
-
-def write_baseline(findings: list[Finding]) -> int:
-    keys = sorted({f.key for f in findings if BASELINEABLE.get(f.check, False)})
-    header = (
-        "# meta-os framework self-check — accepted debt (the ratchet).\n"
-        "#\n"
-        "# Each line is one KNOWN violation, recorded so it warns instead of failing\n"
-        "# the gate. A violation NOT listed here is an error: debt can be paid down,\n"
-        "# never grown. Removing a line is how debt gets retired — do that in the same\n"
-        "# commit that fixes it. Regenerate with:\n"
-        "#     python3 scripts/validate_framework.py --update-baseline\n"
-        "# Format: <check>\\t<path>\\t<detail>\n"
-        "# public-safety findings are never recorded here — see BASELINEABLE.\n"
-    )
-    BASELINE.parent.mkdir(parents=True, exist_ok=True)
-    BASELINE.write_text(header + "\n".join(keys) + "\n", encoding="utf-8")
-    return len(keys)
-
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="meta-os framework self-check")

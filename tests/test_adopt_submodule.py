@@ -128,6 +128,57 @@ class TemplateLayoutTest(base.AdoptTest):
         self.assertIn("stash", git(home, "stash", "list"))
         self.assertEqual("", git(home, "status", "--porcelain"))
 
+    def assert_kept_without_yes(self, inst: Path, expect: str) -> None:
+        out = self.adopt(inst, "--dry-run").stdout
+        self.assertIn("needs --yes:", out)
+        self.assertIn(expect, out)
+        r = self.adopt(inst, check=False)
+        self.assertNotEqual(r.returncode, 0, "the work is not discarded without --yes")
+        self.assertIn("refusing", r.stderr)
+        self.assertTrue((inst / ".meta-os").is_dir(), "nothing was removed")
+
+    def test_a_note_only_this_clone_has_is_kept(self):
+        """Branches and tags were the only refs looked at: notes hold work too."""
+        inst = self.make_template_instance()
+        sub = inst / ".meta-os"
+        git(sub, "notes", "add", "-m", "an annotation only this clone has", "HEAD")
+        self.assertEqual("", git(sub, "status", "--porcelain"))
+        self.assert_kept_without_yes(inst, "commit(s) on no remote-tracking branch")
+
+    def test_a_commit_behind_a_custom_ref_is_kept(self):
+        inst = self.make_template_instance()
+        sub = inst / ".meta-os"
+        recorded = git(sub, "rev-parse", "HEAD")
+        (sub / "WIP.md").write_text("wip\n")
+        git(sub, "add", "WIP.md"); git(sub, "commit", "-q", "-m", "work behind a custom ref")
+        git(sub, "update-ref", "refs/custom/keep", git(sub, "rev-parse", "HEAD"))
+        git(sub, "reset", "-q", "--hard", recorded)
+        git(sub, "reflog", "expire", "--expire=now", "--all")      # no reflog entry points at it either
+        self.assertEqual("", git(sub, "status", "--porcelain"))
+        self.assert_kept_without_yes(inst, "1 commit(s) on no remote-tracking branch")
+
+    def test_a_ref_to_something_that_is_not_a_commit_is_kept(self):
+        inst = self.make_template_instance()
+        sub = inst / ".meta-os"
+        blob = subprocess.run(["git", "hash-object", "-w", "--stdin"], cwd=sub, input="only here\n",
+                              capture_output=True, text=True, check=True).stdout.strip()
+        git(sub, "update-ref", "refs/custom/blob", blob)
+        self.assert_kept_without_yes(inst, "ref(s) to non-commit objects: refs/custom/blob (blob)")
+
+    def test_the_dirt_guard_fires_for_a_local_file_and_a_moved_head(self):
+        inst = self.make_template_instance()
+        sub = inst / ".meta-os"
+        (sub / "NOTES.md").write_text("a file only here\n")
+        self.assert_kept_without_yes(inst, "uncommitted or untracked files")
+        (sub / "NOTES.md").unlink()
+        git(sub, "commit", "-q", "--allow-empty", "-m", "a commit that moves HEAD off the recorded one")
+        out = self.adopt(inst, "--dry-run").stdout
+        self.assertIn("HEAD is not the recorded commit", out)
+        self.assertIn("1 commit(s) on no remote-tracking branch", out)
+        r = self.adopt(inst, check=False)             # the moved gitlink also shows in the instance's own status
+        self.assertNotEqual(r.returncode, 0)
+        self.assertTrue((inst / ".meta-os").is_dir())
+
     def test_a_submodule_shaped_like_the_framework_but_from_elsewhere_needs_yes(self):
         inst = self.make_template_instance()
         other = self.tmp / "other-instance"

@@ -8,6 +8,7 @@ tree, and writes nothing. `scripts/adopt.py` carries the procedure and executes 
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -60,6 +61,7 @@ class Plan:
         self.ignore_moved: list[str] = []
         self.ignore_disabled: list[str] = []
         self.ignore_drop_file = False
+        self.ignore_newly: list[tuple[str, list[str]]] = []   # (rule, untracked files it will start hiding)
         self.replaced: list[str] = []                    # tracked, framework's version wins
         self.backed_up: list[str] = []                   # untracked, framework's version wins
         self.identical: list[str] = []                   # untracked, byte-identical to the framework's
@@ -102,9 +104,20 @@ def is_framework_mount(root: Path, rel: str) -> bool:
 
 
 def norm_url(url: str) -> str:
-    url = url.strip().rstrip("/")
-    url = url[:-4] if url.endswith(".git") else url
-    return url.replace("git@github.com:", "https://github.com/")
+    """A repository URL compared by what it names: no scheme, user, port, case, `.git` or `/` at the end.
+
+    The same rule as `ci_framework_ref.normalise_url`, kept here because this file runs alone, from a
+    temporary directory, on an instance that has not taken the framework yet (see upgrade.sh).
+    """
+    u = url.strip().lower()
+    if re.match(r"^[^/@:]+@([^:/]+):(?!//)", u):
+        u = re.sub(r"^[^/@:]+@([^:/]+):", r"\1/", u)
+    else:
+        u = re.sub(r"^[a-z][a-z0-9+.-]*://", "", u)
+        u = re.sub(r"^[^/@]+@", "", u)
+        u = re.sub(r"^([^/:]+):\d+(?=/|$)", r"\1", u)
+    u = u.rstrip("/")
+    return (u[:-4] if u.endswith(".git") else u).rstrip("/")
 
 
 def submodule_local_state(root: Path, path: str, recorded: str) -> list[str]:
@@ -124,10 +137,25 @@ def submodule_local_state(root: Path, path: str, recorded: str) -> list[str]:
         if git("-C", path, "rev-parse", "HEAD", check=False).stdout.strip() != recorded:
             found.append("HEAD is not the recorded commit")
     visited = set(git("--git-dir", gd, "reflog", "show", "--format=%H", "HEAD", check=False).stdout.split())
-    only_here = git("--git-dir", gd, "rev-list", *sorted(visited), "--branches", "--tags", "--not", "--remotes",
-                    check=False).stdout.split()
+    # Every ref that is neither a remote-tracking branch nor the stash (reported below): branches
+    # and tags, but also notes and any other namespace, which hold work a deleted repository loses.
+    tips: list[str] = []
+    odd: list[str] = []
+    for line in git("--git-dir", gd, "for-each-ref", "--format=%(refname) %(objecttype) %(objectname)",
+                    check=False).stdout.splitlines():
+        ref, kind, sha = line.split(" ")
+        if ref.startswith("refs/remotes/") or ref == "refs/stash":
+            continue
+        if kind in ("commit", "tag"):
+            tips.append(sha)
+        else:
+            odd.append(f"{ref} ({kind})")
+    only_here = git("--git-dir", gd, "rev-list", *sorted(visited | set(tips)), "--not", "--remotes",
+                    check=False).stdout.split() if (visited or tips) else []
     if only_here:
         found.append(f"{len(only_here)} commit(s) on no remote-tracking branch")
+    if odd:
+        found.append("ref(s) to non-commit objects: " + ", ".join(odd))
     if git("--git-dir", gd, "rev-parse", "-q", "--verify", "refs/stash", check=False).returncode == 0:
         found.append("a stash")
     return found
@@ -219,6 +247,25 @@ def rules_matching(rules: list[str], paths: list[str]) -> set[str]:
             if r.stdout.strip():
                 hit.add(rule)
     return hit
+
+
+def ignored_by_rule(rules: list[str], paths: list[str]) -> list[tuple[str, list[str]]]:
+    """For each ignore rule, the PATHS it would ignore (rules that ignore none are left out)."""
+    out: list[tuple[str, list[str]]] = []
+    if not paths:
+        return out
+    with tempfile.TemporaryDirectory(prefix="meta-os-adopt-") as tmp:
+        subprocess.run(["git", "init", "-q", tmp], check=True, capture_output=True)
+        for rule in rules:
+            if rule.lstrip().startswith("#"):
+                continue
+            Path(tmp, ".gitignore").write_text(rule + "\n")
+            r = subprocess.run(["git", "-C", tmp, "check-ignore", "--no-index", "--stdin"],
+                               input="\n".join(paths) + "\n", capture_output=True, text=True)
+            hit = [p for p in r.stdout.splitlines() if p.strip()]
+            if hit:
+                out.append((rule, hit))
+    return out
 
 
 def make_plan(root: Path, target: str, remote_url: str) -> Plan:
@@ -321,6 +368,11 @@ def make_plan(root: Path, target: str, remote_url: str) -> Plan:
         plan.ignore_moved = [r for r in lines if r not in bad]
         plan.ignore_disabled = [r for r in lines if r in bad]
         plan.ignore_drop_file = True
+        if GITIGNORE in is_link:
+            # git never read a symlinked .gitignore, so these rules were not in effect: once they sit in
+            # .gitignore.instance they are, and an untracked file they match stops showing in `git status`.
+            untracked = git("ls-files", "--others", "--exclude-standard", "-z", check=False).stdout.split("\0")
+            plan.ignore_newly = ignored_by_rule(plan.ignore_moved, [u for u in untracked if u])
         handled.add(GITIGNORE)
 
     # 4. everything else at a framework path
@@ -390,6 +442,10 @@ def report(plan: Plan, target: str, short: str) -> None:
             say(f"    moved:    {r}")
         for r in plan.ignore_disabled:
             say(f"    disabled: {r}   (matches framework files; kept commented out in {INSTANCE_IGNORE})")
+        for rule, hit in plan.ignore_newly:
+            shown = ", ".join(hit[:5]) + (f" and {len(hit) - 5} more" if len(hit) > 5 else "")
+            say(f"    newly effective: {rule}   ({GITIGNORE} here is a symlink, which git never read; "
+                f"once moved it hides {len(hit)} untracked file(s) from git status: {shown})")
     if plan.replaced or plan.backed_up:
         say("  instance content at framework paths — the framework's version replaces it:")
         for p in plan.replaced:

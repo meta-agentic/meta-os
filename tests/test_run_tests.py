@@ -111,8 +111,9 @@ class InInstance(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.fw = self.tmp / "framework"
         for rel, text in {"scripts/run_tests.py": RUNNER.read_text(),
-                          "scripts/validate_framework.py": (ROOT / "scripts" / "validate_framework.py").read_text(),
-                          "scripts/ci_framework_ref.py": (ROOT / "scripts" / "ci_framework_ref.py").read_text(),
+                          **{f"scripts/{n}": (ROOT / "scripts" / n).read_text() for n in (
+                              "validate_framework.py", "framework_findings.py", "framework_safety.py",
+                              "framework_scope.py", "ci_framework_ref.py")},
                           "tests/test_t.py": PASSING, "pipeline/tests/test_p.py": PASSING}.items():
             (self.fw / rel).parent.mkdir(parents=True, exist_ok=True)
             (self.fw / rel).write_text(text, encoding="utf-8")

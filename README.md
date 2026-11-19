@@ -1,5 +1,7 @@
 # meta-os — Agentic OS framework
 
+[![CI](https://github.com/meta-agentic/meta-os/actions/workflows/check.yml/badge.svg?branch=main)](https://github.com/meta-agentic/meta-os/actions/workflows/check.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 The **generic framework** of an Agentic OS built on Claude Code + Obsidian: a skill
 backbone, an operating model for agent coordination, memory conventions, note templates,
 and the template a fresh instance starts from — with **no instance data**. Your private
